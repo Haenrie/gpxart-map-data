@@ -2,7 +2,7 @@
 
 Builder für den **Wegegraphen** von [gpxart.com](https://gpxart.com), dem Planer für Strava-Art: Er liest
 OpenStreetMap-Daten (`.osm.pbf`) und schreibt das Wegenetz als z12-Kacheln, in denen der Planer im Browser Routen
-rechnet. Jeden Monat baut ein GitHub-Actions-Lauf hier ganz DACH (Deutschland, Österreich, Schweiz) und veröffentlicht
+rechnet. Jedes Quartal baut ein GitHub-Actions-Lauf hier ganz DACH (Deutschland, Österreich, Schweiz) und veröffentlicht
 die Kacheln als [Release](https://github.com/Haenrie/gpxart-map-data/releases); gpxart.com liefert sie von dort aus.
 
 Hier liegt nur der Builder. Website, Router und Suche von gpxart.com sind nicht öffentlich.
@@ -23,7 +23,7 @@ Beiträge von außen (Pull Requests) nehme ich derzeit nicht an.
 | `src/` | Builder (Rust): PBF lesen (`pbf.rs`), Regeln je Fortbewegungsart (`rules.rs`), Kacheln schneiden (`tiling.rs`), Kachel-Datei schreiben (`format.rs`) |
 | `tests/` | `cargo test`: ein winziger OSM-Ausschnitt, gebaut und nach dem Format-Dokument gelesen |
 | [`docs/wegegraph-format.md`](docs/wegegraph-format.md) | Kachelformat (Version 2), der Vertrag zwischen Builder und Router; diese Fassung ist maßgeblich |
-| [`.github/workflows/dach.yml`](.github/workflows/dach.yml) | Monatlicher Bau von ganz DACH als Release |
+| [`.github/workflows/dach.yml`](.github/workflows/dach.yml) | Vierteljährlicher Bau von ganz DACH als Release |
 | [`.github/workflows/tests.yml`](.github/workflows/tests.yml) | `cargo test` bei jedem Push und Pull Request |
 
 ## Bauen
@@ -52,10 +52,10 @@ weichen einzelne Kacheln geringfügig ab, weil die Mathematik-Bibliotheken (`tan
 anders runden; bei DACH 616 von 14 255 Kacheln, meist um einen Knoten. Eine Kachel hängt nur von den Wegen ab, die sie
 berühren; der Builder baut große Gebiete darum in Streifen aus 8 Kachelzeilen, mit denselben Kacheln wie in einem Stück.
 
-## Monatlicher Lauf und Releases
+## Vierteljährlicher Lauf und Releases
 
-[`dach.yml`](.github/workflows/dach.yml) läuft am 1. jedes Monats um 02:17 UTC und lässt sich unter Actions → „DACH
-bauen“ → „Run workflow“ von Hand starten. Er lädt `dach-latest.osm.pbf` von Geofabrik (einmal im Monat, mit
+[`dach.yml`](.github/workflows/dach.yml) läuft am 1. Januar, April, Juli und Oktober um 02:17 UTC und lässt sich unter Actions → „DACH
+bauen“ → „Run workflow“ von Hand starten. Er lädt `dach-latest.osm.pbf` von Geofabrik (einmal im Quartal, mit
 Prüfsumme), führt die Tests aus, baut alle Kacheln, prüft die Grenzen der Auslieferung und legt ein Release an. Die
 drei neuesten Releases bleiben, ältere werden gelöscht.
 
@@ -70,7 +70,7 @@ schon, baut der Lauf nichts. Kacheln einer Version ändern sich nie; ein Server 
 | `wegegraph.json` | Version, Quelle, Commit, Kachelzahl, Größe, größte Kachel, Speicher und Dauer des Baus |
 | `SHA256SUMS` | Prüfsummen der beiden Dateien |
 
-gpxart.com holt jeden Monat das neueste Release ab und veröffentlicht es auf Cloudflare Workers (Static Assets); dieses
+gpxart.com holt jedes Quartal das neueste Release ab und veröffentlicht es auf Cloudflare Workers (Static Assets); dieses
 Repo braucht dafür keine Zugangsdaten.
 
 ## Größen und Grenzen (DACH, gemessen)

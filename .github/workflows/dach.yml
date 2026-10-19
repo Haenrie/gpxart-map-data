@@ -1,6 +1,6 @@
 # Baut den Wegegraphen für ganz DACH aus dem Geofabrik-Auszug und veröffentlicht ihn als Release.
 #
-#   Monatlich   am 1. um 02:17 UTC
+#   Vierteljährlich   am 1. Januar, April, Juli und Oktober um 02:17 UTC
 #   Von Hand    „Run workflow“
 #
 # Ein Release enthält wegegraph.tar.gz (aktuell.json, LIZENZ.txt und <Version>/12/<x>/<y>.bin, also genau den Ordner
@@ -15,7 +15,7 @@ name: DACH bauen
 
 on:
   schedule:
-    - cron: '17 2 1 * *'
+    - cron: '17 2 1 1,4,7,10 *'
   workflow_dispatch:
 
 permissions:
