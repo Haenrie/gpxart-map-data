@@ -1,0 +1,6 @@
+# Einheitliche LF-Zeilenenden im Repo, unabhängig vom Betriebssystem
+* text=auto eol=lf
+
+# Binärdateien nie umwandeln
+*.bin binary
+*.pbf binary

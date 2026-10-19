@@ -1,0 +1,7 @@
+# Rust
+/target/
+
+# Eingabe und Ausgabe des Builders
+*.osm.pbf
+/graph/
+*.tar.gz

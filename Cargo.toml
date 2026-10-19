@@ -1,0 +1,11 @@
+[package]
+name = "wegegraph"
+version = "0.1.0"
+edition = "2024"
+description = "Baut aus OSM-Daten (.osm.pbf) den Wegegraphen von gpxart.com als z12-Kacheln"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Haenrie/gpxart-map-data"
+publish = false
+
+[dependencies]
+osmpbf = "0.3.8"
