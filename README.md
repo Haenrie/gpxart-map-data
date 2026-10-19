@@ -47,7 +47,9 @@ Unter Windows mit Smart App Control kann `cargo` mit „Eine Anwendungssteuerung
 anderer Optimierung bauen: `CARGO_PROFILE_DEV_BUILD_OVERRIDE_OPT_LEVEL=1 cargo test` (für `--release` entsprechend
 `CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_OPT_LEVEL`), notfalls mit `2`.
 
-Mit denselben Eingabedateien entstehen byte-gleiche Kacheln. Eine Kachel hängt nur von den Wegen ab, die sie
+Mit denselben Eingabedateien entstehen auf demselben Betriebssystem byte-gleiche Kacheln. Zwischen Linux und Windows
+weichen einzelne Kacheln geringfügig ab, weil die Mathematik-Bibliotheken (`tan`, `asinh` …) in der letzten Stelle
+anders runden; bei DACH 616 von 14 255 Kacheln, meist um einen Knoten. Eine Kachel hängt nur von den Wegen ab, die sie
 berühren; der Builder baut große Gebiete darum in Streifen aus 8 Kachelzeilen, mit denselben Kacheln wie in einem Stück.
 
 ## Monatlicher Lauf und Releases
@@ -57,7 +59,7 @@ bauen“ → „Run workflow“ von Hand starten. Er lädt `dach-latest.osm.pbf`
 Prüfsumme), führt die Tests aus, baut alle Kacheln, prüft die Grenzen der Auslieferung und legt ein Release an. Die
 drei neuesten Releases bleiben, ältere werden gelöscht.
 
-**Version** ist das Datum der OSM-Daten plus der Commit des Builders, z. B. `2026-10-18-1a2b3c4`. Gibt es das Release
+**Version** ist das Datum der OSM-Daten plus der Commit des Builders, z. B. `2026-10-18-cf1e32f`. Gibt es das Release
 schon, baut der Lauf nichts. Kacheln einer Version ändern sich nie; ein Server darf sie dauerhaft cachen.
 
 **Ein Release enthält:**
@@ -82,8 +84,11 @@ Geofabrik `dach-261018.osm.pbf` (6,25 GB, OSM-Daten vom 18.10.2026):
 | Alle Kacheln | 1,23 GB, gepackt 658 MB | 2 GiB je Release-Datei (GitHub) |
 | Wege, Knoten im PBF | 20,8 Mio. Wege, 125 Mio. Knoten | |
 | Graph | 76,8 Mio. Knoten, 84,2 Mio. Kanten | |
-| Bau auf einem Windows-PC | 4½–5 min (davon Lesen 3½ min), Speicher höchstens 6,0 GiB (Working Set; 7,0 GiB zugesagt) | |
-| Bau auf GitHub Actions | siehe Release-Notizen | 16 GB RAM, 14 GB Platte, 6 h |
+| Bau auf GitHub Actions ([erstes Release](https://github.com/Haenrie/gpxart-map-data/releases/tag/2026-10-18-cf1e32f)) | Builder 7 min 13 s (davon Lesen 5 min 8 s), höchstens 6,4 GiB (Max RSS); ganzer Lauf 20 min, davon Download 10 min | 16 GB RAM (15 GiB nutzbar), Platte (86 GB frei, gebraucht gut 8 GB), 6 h je Job |
+| Bau auf einem Windows-PC | 4½–5 min (davon Lesen 3½ min), höchstens 6,0 GiB (Working Set) | |
+
+Den Speicher bestimmt vor allem das Lesen (5,6 GiB): Knoten-IDs, die `osmpbf` beim Lesen sammelt, dazu alle Knoten (16
+Byte) und Wege. Das Schneiden in Streifen braucht danach knapp 1 GiB mehr.
 
 Zu den Kacheln gehören auch Fährlinien aus DACH heraus (z. B. nach Skandinavien); deshalb reicht der gebaute Bereich
 über DACH hinaus.
