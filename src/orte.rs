@@ -219,7 +219,7 @@ impl Orte {
         let staedte: Vec<(i64, &Ort, f64)> = orte
             .iter()
             .filter(|(_, ort, _)| ort.art < STADT)
-            .map(|&(id, ort, _)| (id, ort, (ort.groesse as f64).powf(2.0 / 3.0)))
+            .map(|&(id, ort, _)| (id, ort, (ort.groesse as f64).sqrt()))
             .collect();
 
         let orte: Vec<_> = orte
@@ -462,7 +462,7 @@ fn in_bereichen(ort: &Ort, bereiche: &[TileRange]) -> bool {
 }
 
 /// Die Stadt, auf die man sich bei einem Ort bezieht: die nächste, wobei größere Städte weiter weg sein dürfen
-/// (Entfernung geteilt durch die dritte Wurzel der Größe, kleinste gewinnt).
+/// (Entfernung geteilt durch die vierte Wurzel der Größe, kleinste gewinnt).
 fn naechstgroessere_stadt<'a>(
     id: i64,
     ort: &Ort,

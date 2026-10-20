@@ -39,7 +39,7 @@ außerhalb aller Grenzen weg (der Geofabrik-Auszug reicht etwas über DACH hinau
 bleiben alle Orte, dann teils ohne Land.
 
 **Nächstgrößere Stadt.** Stadtteile, Viertel, Dörfer und Weiler nennen eine Stadt (`city` oder `town`), auf die man
-sich bei ihnen bezieht: die mit der kleinsten Entfernung geteilt durch die dritte Wurzel ihrer Größe. So gilt die
+sich bei ihnen bezieht: die mit der kleinsten Entfernung geteilt durch die vierte Wurzel ihrer Größe. So gilt die
 nahe Kleinstadt, eine Großstadt darf aber weiter weg sein („Neustadt bei Marburg“, „Kreuzberg von Berlin“). Städte
 selbst nennen keine.
 
