@@ -105,6 +105,6 @@ Zu den Kacheln gehören auch Fährlinien aus DACH heraus (z. B. nach Skandinavie
 
 **Ortsverzeichnis** (gleiche Daten, Windows-PC): 126 417 Orte (101 Großstädte, 2 621 Städte, 7 410 Stadtteile,
 1 886 Viertel, 46 410 Dörfer, 67 988 Weiler) in 52 Ländern und Kantonen; 324 Teile und `index.json`, zusammen 8,5 MB,
-gepackt (gzip) 2,8 MB. Ein Abruf beim Tippen ist meist wenige kB groß, der größte Teil (`sc.json`) 318 kB, gepackt
-94 kB. Bau gut 2 min (fast nur Lesen), höchstens 0,5 GiB Speicher. Im Genfersee fehlen dem Auszug fünf Wege der
+gepackt (gzip) 2,8 MB. Ein Abruf beim Tippen ist meist wenige kB groß, der größte Teil (`sc.json`) 319 kB, gepackt
+96 kB. Bau gut 2 min (fast nur Lesen), höchstens 0,5 GiB Speicher. Im Genfersee fehlen dem Auszug fünf Wege der
 Grenze von Schweiz und Waadt; der Builder schließt die Lücke (10,7 km) gerade.
