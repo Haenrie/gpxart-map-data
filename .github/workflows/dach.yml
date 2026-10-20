@@ -1,10 +1,12 @@
-# Baut den Wegegraphen für ganz DACH aus dem Geofabrik-Auszug und veröffentlicht ihn als Release.
+# Baut den Wegegraphen und das Ortsverzeichnis für ganz DACH aus dem Geofabrik-Auszug und veröffentlicht sie als
+# Release.
 #
 #   Vierteljährlich   am 1. Januar, April, Juli und Oktober um 02:17 UTC
 #   Von Hand    „Run workflow“
 #
 # Ein Release enthält wegegraph.tar.gz (aktuell.json, LIZENZ.txt und <Version>/12/<x>/<y>.bin, also genau den Ordner
-# graph/ eines Servers), wegegraph.json (Version, Quelle, Messwerte) und SHA256SUMS. Die Version ist das Datum der
+# graph/ eines Servers), ortsverzeichnis.tar.gz (<Version>/orte/, gehört in denselben Ordner), wegegraph.json (Version,
+# Quelle, Messwerte) und SHA256SUMS. Die Version ist das Datum der
 # OSM-Daten plus der Commit des Builders, z. B. 2026-10-18-1a2b3c4; gibt es sie schon, baut der Lauf nichts.
 # gpxart.com holt das Release ab und liefert es aus; dieses Repo braucht dafür keine Geheimnisse.
 #
@@ -104,9 +106,20 @@ jobs:
         run: |
           [ -x /usr/bin/time ] || sudo apt-get install -y -qq time
           /usr/bin/time -v -o zeit.txt target/release/wegegraph "graph/$VERSION" dach.osm.pbf | tee bau.log | grep -v '^Zeilen'
-          rm dach.osm.pbf
           grep -E 'Maximum resident|Elapsed' zeit.txt
           df -h .
+
+      # Ortsverzeichnis für die Ortssuche (gpxart.com #39), Format in docs/ortsverzeichnis-format.md. Fehlt einer
+      # Landesgrenze zu viel, bleibt sie unberücksichtigt; das meldet der Lauf als Warnung.
+      - name: Ortsverzeichnis bauen
+        if: steps.version.outputs.neu == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          /usr/bin/time -v -o zeit-orte.txt target/release/wegegraph orte "orte/$VERSION/orte" dach.osm.pbf | tee orte.log
+          rm dach.osm.pbf
+          grep -E 'Maximum resident|Elapsed' zeit-orte.txt
+          grep 'unvollständig' orte.log | while read -r zeile; do echo "::warning::$zeile"; done
 
       - name: Grenzen prüfen und packen
         if: steps.version.outputs.neu == 'true'
@@ -120,37 +133,52 @@ jobs:
           summe=$(find "graph/$VERSION" -name '*.bin' -printf '%s\n' | awk '{ s += $1 } END { print s }')
           speicher_kb=$(awk -F': ' '/Maximum resident/ { print $2 }' zeit.txt)
           dauer=$(awk -F': ' '/Elapsed/ { print $2 }' zeit.txt)
+          orte=$(jq .orte "orte/$VERSION/orte/index.json")
+          orte_dateien=$(find "orte/$VERSION/orte" -name '*.json' | wc -l)
+          orte_bytes=$(find "orte/$VERSION/orte" -name '*.json' -printf '%s\n' | awk '{ s += $1 } END { print s }')
+          read -r orte_groesste orte_groesste_datei < <(find "orte/$VERSION/orte" -name '*.json' -printf '%s %f\n' | sort -n | tail -1)
+          orte_dauer=$(awk -F': ' '/Elapsed/ { print $2 }' zeit-orte.txt)
 
           echo "{\"version\":\"$VERSION\"}" > graph/aktuell.json
           cat > graph/LIZENZ.txt <<EOF
-          Wegegraph für gpxart.com, Version $VERSION
+          Wegegraph und Ortsverzeichnis für gpxart.com, Version $VERSION
 
           Daten © OpenStreetMap-Mitwirkende, verfügbar unter der Open Database License (ODbL) 1.0,
           https://opendatacommons.org/licenses/odbl/1-0/ und https://www.openstreetmap.org/copyright.
-          Dieser Wegegraph ist eine aus OpenStreetMap abgeleitete Datenbank und steht ebenfalls unter der ODbL 1.0.
+          Wegegraph und Ortsverzeichnis sind aus OpenStreetMap abgeleitete Datenbanken und stehen ebenfalls unter der
+          ODbL 1.0.
           Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).
 
           Quelle: Geofabrik-Auszug $DATEI (OSM-Daten vom $DATUM).
           Gebaut mit https://github.com/$GITHUB_REPOSITORY (Commit $GITHUB_SHA),
-          Format: https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/wegegraph-format.md
+          Format: https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/wegegraph-format.md und
+          https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/ortsverzeichnis-format.md
           EOF
           tar -C graph -czf wegegraph.tar.gz aktuell.json LIZENZ.txt "$VERSION"
           archiv=$(stat -c %s wegegraph.tar.gz)
+          tar -C orte -czf ortsverzeichnis.tar.gz "$VERSION"
+          orte_archiv=$(stat -c %s ortsverzeichnis.tar.gz)
 
           jq -n --arg version "$VERSION" --arg quelle "$DATEI" --arg datum "$DATUM" --arg commit "$GITHUB_SHA" \
             --argjson kacheln "$kacheln" --argjson bytes "$summe" --argjson archiv "$archiv" \
             --arg groesste_kachel "$groesste_kachel" --argjson groesste "$groesste" \
             --argjson speicher_kb "$speicher_kb" --arg dauer "$dauer" \
+            --argjson orte "$orte" --argjson orte_dateien "$orte_dateien" --argjson orte_bytes "$orte_bytes" \
+            --argjson orte_archiv "$orte_archiv" --arg orte_dauer "$orte_dauer" \
             '{version: $version, format: 2, quelle: $quelle, osm_datum: $datum, commit: $commit,
               kacheln: $kacheln, bytes: $bytes, archiv_bytes: $archiv,
               groesste_kachel: {pfad: $groesste_kachel, bytes: $groesste},
-              bau: {speicher_hoechstens_kb: $speicher_kb, dauer: $dauer}}' > wegegraph.json
-          sha256sum wegegraph.tar.gz wegegraph.json > SHA256SUMS
+              bau: {speicher_hoechstens_kb: $speicher_kb, dauer: $dauer},
+              ortsverzeichnis: {format: 1, orte: $orte, dateien: $orte_dateien, bytes: $orte_bytes,
+                archiv_bytes: $orte_archiv, dauer: $orte_dauer}}' > wegegraph.json
+          sha256sum wegegraph.tar.gz ortsverzeichnis.tar.gz wegegraph.json > SHA256SUMS
           cat wegegraph.json
 
-          # Grenzen: Graph-Worker mit Kacheln, aktuell.json, LIZENZ.txt und 404.html; je Datei 25 MiB; Release-Datei 2 GiB
+          # Grenzen: Graph-Worker mit Kacheln, Ortsverzeichnis, aktuell.json, LIZENZ.txt und 404.html; je Datei 25 MiB;
+          # Release-Datei 2 GiB
           fehler=0
-          [ $((kacheln + 3)) -le 20000 ] || { echo "::error::$kacheln Kacheln: zu viele Dateien für einen Worker"; fehler=1; }
+          [ $((kacheln + orte_dateien + 3)) -le 20000 ] \
+            || { echo "::error::$kacheln Kacheln und $orte_dateien Ortsdateien: zu viele Dateien für einen Worker"; fehler=1; }
           [ "$groesste" -le $((25 * 1024 * 1024)) ] || { echo "::error::$groesste_kachel ist größer als 25 MiB"; fehler=1; }
           [ "$archiv" -le $((2 * 1024 * 1024 * 1024)) ] || { echo "::error::Archiv größer als 2 GiB"; fehler=1; }
           [ $fehler = 0 ]
@@ -167,9 +195,10 @@ jobs:
             echo "| Größe | $(mib "$summe"), gepackt $(mib "$archiv") (Grenze 2 GiB) |"
             echo "| Größte Kachel | \`$groesste_kachel\`, $(mib "$groesste") (Grenze 25 MiB) |"
             echo "| Bau | $dauer, höchstens $(mib $((speicher_kb * 1024))) Speicher |"
+            echo "| Ortsverzeichnis | $orte Orte in $orte_dateien Dateien, $(mib "$orte_bytes"), gepackt $(mib "$orte_archiv"); größte \`$orte_groesste_datei\` $(mib "$orte_groesste"); Bau $orte_dauer ([Format](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/ortsverzeichnis-format.md)) |"
             echo
             echo "Daten © [OpenStreetMap-Mitwirkende](https://www.openstreetmap.org/copyright), Open Database License"
-            echo "(ODbL) 1.0. Der Wegegraph ist eine abgeleitete Datenbank und steht ebenfalls unter der ODbL."
+            echo "(ODbL) 1.0. Wegegraph und Ortsverzeichnis sind abgeleitete Datenbanken und stehen ebenfalls unter der ODbL."
           } > notizen.md
           cat notizen.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -180,7 +209,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           DATUM: ${{ steps.version.outputs.datum }}
         run: |
-          gh release create "$VERSION" wegegraph.tar.gz wegegraph.json SHA256SUMS \
+          gh release create "$VERSION" wegegraph.tar.gz ortsverzeichnis.tar.gz wegegraph.json SHA256SUMS \
             --target "$GITHUB_SHA" --title "Wegegraph DACH $DATUM" --notes-file notizen.md
           gh release list --limit 100 --json tagName,createdAt \
             --jq "sort_by(.createdAt) | reverse | .[$BEHALTEN:] | .[].tagName" |

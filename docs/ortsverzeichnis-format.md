@@ -87,4 +87,4 @@ Eine Liste von Orten, jeder als Liste, die größten zuerst (bei gleicher Größ
 | 6 | nächstgrößere Stadt (ihr `name`), `""` bei Städten |
 | 7 | nur wenn vorhanden: abweichende Namen je Sprache (`name:de`, `name:en`), z. B. `{"de":"Genf","en":"Geneva"}` |
 
-Der Builder schreibt dieselben Eingabedateien byte-gleich.
+Aus denselben Eingabedateien schreibt der Builder byte-gleiche Dateien.
