@@ -5,3 +5,4 @@
 *.osm.pbf
 /graph/
 *.tar.gz
+/orte/

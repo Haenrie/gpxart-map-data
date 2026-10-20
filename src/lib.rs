@@ -1,11 +1,13 @@
 //! Builder für den Wegegraphen von gpxart.com: OSM-Ausschnitt rein, z12-Kacheln raus.
-//! Das Kachelformat steht in `docs/wegegraph-format.md` (im Repo-Wurzelordner).
+//! Das Kachelformat steht in `docs/wegegraph-format.md` (im Repo-Wurzelordner). Daneben baut `Orte` das
+//! Ortsverzeichnis für die Ortssuche (`docs/ortsverzeichnis-format.md`).
 //!
 //! Speicher: Ganz DACH hat rund 20 Mio. Wege mit über 100 Mio. Knoten. Darum liegen Knoten und Wege in flachen,
 //! nach OSM-ID sortierten Listen (statt in Maps), von jedem Weg bleibt statt der Tags nur der Verweis auf seine
 //! Stellen, und die Kacheln entstehen streifenweise (`build_tiles` für einen Teilbereich).
 
 mod format;
+mod orte;
 mod pbf;
 mod rules;
 mod tiling;
@@ -13,6 +15,7 @@ mod tiling;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+pub use orte::{Orte, Ortsverzeichnis};
 use rules::{Stellen, Tags};
 pub use tiling::build_tiles;
 

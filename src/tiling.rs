@@ -59,7 +59,7 @@ impl Point {
 }
 
 /// Breite/Länge in Grad → Rasterkoordinate.
-fn project(lat: f64, lon: f64) -> (i64, i64) {
+pub(crate) fn project(lat: f64, lon: f64) -> (i64, i64) {
     let x = (lon + 180.0) / 360.0 * WORLD;
     let y = (1.0 - lat.to_radians().tan().asinh() / PI) / 2.0 * WORLD;
     (x.round() as i64, y.round() as i64)
