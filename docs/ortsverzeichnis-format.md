@@ -31,9 +31,10 @@ einmal.
 
 **Land.** Ein Ort liegt im Land (Bundesland, Kanton), dessen Grenz-Relation ihn umschließt (`boundary=administrative`,
 `admin_level=4`, `ISO3166-2` mit `DE-`, `AT-` oder `CH-`), sonst im Staat (`admin_level=2`, `ISO3166-1` `DE`, `AT`,
-`CH` oder `LI`; so Liechtenstein). Fehlen einer Grenze Wege, schließen gerade Linien zwischen den offenen Enden die
-Ringe, solange die Lücken zusammen höchstens 100 km lang sind (im DACH-Auszug fehlt z. B. ein Stück der Grenze im
-Genfersee); sonst bleibt die Grenze unberücksichtigt. Gibt es mindestens eine vollständige Staatsgrenze, fallen Orte
+`CH` oder `LI`; so Liechtenstein). Fehlen einer Grenze einzelne Wege (höchstens 5 %), schließen gerade Linien
+zwischen den offenen Enden die Ringe, solange die Lücken zusammen höchstens 100 km lang sind (im DACH-Auszug fehlt
+z. B. ein Stück der Grenze im Genfersee); sonst bleibt die Grenze unberücksichtigt. Gibt es mindestens eine
+vollständige Staatsgrenze, fallen Orte
 außerhalb aller Grenzen weg (der Geofabrik-Auszug reicht etwas über DACH hinaus). In Teilauszügen ohne Staatsgrenzen
 bleiben alle Orte, dann teils ohne Land.
 

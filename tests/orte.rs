@@ -17,7 +17,12 @@ fn staedte_doerfer_und_stadtteile_kommen_unter_jedem_wortanfang_ins_verzeichnis(
             ("population", "29.317"),
         ],
     );
-    orte.add_node(2, 48.0903, 10.8573, &[("place", "village"), ("name", "Kaufering")]);
+    orte.add_node(
+        2,
+        48.0903,
+        10.8573,
+        &[("place", "village"), ("name", "Kaufering")],
+    );
     orte.add_node(
         3,
         48.1371,
@@ -30,16 +35,29 @@ fn staedte_doerfer_und_stadtteile_kommen_unter_jedem_wortanfang_ins_verzeichnis(
         ],
     );
     // nicht ins Verzeichnis: falsche Art, ohne Namen, gar kein Ort
-    orte.add_node(4, 48.05, 10.88, &[("place", "isolated_dwelling"), ("name", "Lechhof")]);
+    orte.add_node(
+        4,
+        48.05,
+        10.88,
+        &[("place", "isolated_dwelling"), ("name", "Lechhof")],
+    );
     orte.add_node(5, 48.06, 10.89, &[("place", "village")]);
-    orte.add_node(6, 48.07, 10.90, &[("amenity", "townhall"), ("name", "Lechrathaus")]);
+    orte.add_node(
+        6,
+        48.07,
+        10.90,
+        &[("amenity", "townhall"), ("name", "Lechrathaus")],
+    );
 
     let verzeichnis = Verzeichnis::lies(&orte);
 
     assert_eq!(verzeichnis.anzahl, 3);
     let landsberg = verzeichnis.eintrag("la", "Landsberg am Lech");
     assert_eq!(landsberg[1], "town");
-    assert_eq!((landsberg[2].as_f64(), landsberg[3].as_f64()), (Some(10.8688), Some(48.0478)));
+    assert_eq!(
+        (landsberg[2].as_f64(), landsberg[3].as_f64()),
+        (Some(10.8688), Some(48.0478))
+    );
     assert_eq!(landsberg[4], 29317, "Einwohnerzahl");
     assert_eq!(
         verzeichnis.eintrag("le", "Landsberg am Lech"),
@@ -53,16 +71,50 @@ fn staedte_doerfer_und_stadtteile_kommen_unter_jedem_wortanfang_ins_verzeichnis(
         "Munich",
         "mit Namen in anderen Sprachen, und unter „mu“ für beide"
     );
-    assert!(!verzeichnis.alle().any(|e| e[0] == "Lechhof" || e[0] == "Lechrathaus"));
+    assert!(
+        !verzeichnis
+            .alle()
+            .any(|e| e[0] == "Lechhof" || e[0] == "Lechrathaus")
+    );
 }
 
 #[test]
 fn gleichnamige_orte_unterscheiden_sich_durch_land_und_naechstgroessere_stadt() {
     let mut orte = Orte::default();
     // Ein Staat mit zwei Ländern, alle als Rechtecke; Bayern aus zwei Wegen, die anderen aus je einem geschlossenen.
-    rechteck(&mut orte, 100, (47.0, 9.0), (49.0, 12.0), "4", "Bayern", "Bavaria", "DE-BY", true);
-    rechteck(&mut orte, 200, (49.5, 8.0), (51.5, 10.0), "4", "Hessen", "Hesse", "DE-HE", false);
-    rechteck(&mut orte, 300, (47.0, 8.0), (52.0, 12.0), "2", "Deutschland", "Germany", "DE", false);
+    rechteck(
+        &mut orte,
+        100,
+        (47.0, 9.0),
+        (49.0, 12.0),
+        "4",
+        "Bayern",
+        "Bavaria",
+        "DE-BY",
+        true,
+    );
+    rechteck(
+        &mut orte,
+        200,
+        (49.5, 8.0),
+        (51.5, 10.0),
+        "4",
+        "Hessen",
+        "Hesse",
+        "DE-HE",
+        false,
+    );
+    rechteck(
+        &mut orte,
+        300,
+        (47.0, 8.0),
+        (52.0, 12.0),
+        "2",
+        "Deutschland",
+        "Germany",
+        "DE",
+        false,
+    );
     for (id, lat, lon, place, name) in [
         (1, 48.0478, 10.8688, "town", "Landsberg am Lech"),
         (2, 48.0600, 10.9000, "village", "Neustadt"),
@@ -78,7 +130,10 @@ fn gleichnamige_orte_unterscheiden_sich_durch_land_und_naechstgroessere_stadt() 
     let land = |eintrag: &Value| verzeichnis.laender[eintrag[5].as_u64().unwrap() as usize].clone();
     let neustadt = verzeichnis.teil("ne").unwrap();
     assert_eq!(neustadt.len(), 2);
-    let mut zusaetze: Vec<_> = neustadt.iter().map(|e| (land(e)[0].clone(), e[6].clone())).collect();
+    let mut zusaetze: Vec<_> = neustadt
+        .iter()
+        .map(|e| (land(e)[0].clone(), e[6].clone()))
+        .collect();
     zusaetze.sort_by_key(|z| z.0.to_string());
     assert_eq!(
         zusaetze,
@@ -87,8 +142,14 @@ fn gleichnamige_orte_unterscheiden_sich_durch_land_und_naechstgroessere_stadt() 
             (Value::from("Hessen"), Value::from("Marburg")),
         ]
     );
-    assert_eq!(land(&verzeichnis.eintrag("ma", "Marburg")), serde_json::json!(["Hessen", "Hesse", "DE"]));
-    assert!(verzeichnis.teil("st").is_none(), "außerhalb der Länder kein Ort");
+    assert_eq!(
+        land(&verzeichnis.eintrag("ma", "Marburg")),
+        serde_json::json!(["Hessen", "Hesse", "DE"])
+    );
+    assert!(
+        verzeichnis.teil("st").is_none(),
+        "außerhalb der Länder kein Ort"
+    );
 }
 
 /// Ein Land (`admin_level=4`) oder Staat (`2`) als Rechteck (Süd-West, Nord-Ost), als Grenz-Relation
@@ -122,7 +183,14 @@ fn rechteck(
         ("admin_level", admin_level),
         ("name", de),
         ("name:en", en),
-        (if admin_level == "2" { "ISO3166-1" } else { "ISO3166-2" }, iso),
+        (
+            if admin_level == "2" {
+                "ISO3166-1"
+            } else {
+                "ISO3166-2"
+            },
+            iso,
+        ),
     ];
     orte.add_relation(id, &wege, &tags);
 }
@@ -146,7 +214,8 @@ impl Verzeichnis {
             .iter()
             .map(|t| {
                 let t = t.as_str().unwrap().to_string();
-                let eintraege: Value = serde_json::from_str(&dateien[&format!("{t}.json")]).unwrap();
+                let eintraege: Value =
+                    serde_json::from_str(&dateien[&format!("{t}.json")]).unwrap();
                 (t, eintraege.as_array().unwrap().clone())
             })
             .collect();
@@ -158,7 +227,10 @@ impl Verzeichnis {
     }
 
     fn teil(&self, schluessel: &str) -> Option<&Vec<Value>> {
-        self.teile.iter().find(|(t, _)| t == schluessel).map(|(_, e)| e)
+        self.teile
+            .iter()
+            .find(|(t, _)| t == schluessel)
+            .map(|(_, e)| e)
     }
 
     fn eintrag(&self, schluessel: &str, name: &str) -> Value {

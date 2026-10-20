@@ -32,8 +32,10 @@ const SCHLUESSEL: usize = 2;
 const WORT_MIN: usize = 3;
 /// Breite der Streifen, in die die Grenzen für die Strahlprobe geteilt sind (Grad)
 const STREIFEN: f64 = 0.02;
-/// So lang dürfen die Lücken in einer Grenze zusammen sein, die gerade Linien schließen (km)
+/// So lang dürfen die Lücken in einer Grenze zusammen sein, die gerade Linien schließen (km), …
 const MAX_LUECKEN_KM: f64 = 100.0;
+/// … und so groß der Anteil der fehlenden Wege (in Teilauszügen fehlt meist der größte Teil).
+const MAX_ANTEIL_FEHLT: f64 = 0.05;
 
 #[derive(Clone)]
 struct Ort {
@@ -193,11 +195,18 @@ impl Orte {
                     }
                     flaechen.push((grenze, f));
                 }
-                Err(e) => meldungen.push(format!("{name}: unvollständig, nicht berücksichtigt ({e})")),
+                Err(e) => {
+                    meldungen.push(format!("{name}: unvollständig, nicht berücksichtigt ({e})"))
+                }
             }
         }
         flaechen.sort_by_key(|(g, _)| std::cmp::Reverse(g.ebene));
-        let land_von = |ort: &Ort| flaechen.iter().find(|(_, f)| f.enthaelt(ort.lat, ort.lon)).map(|(g, _)| *g);
+        let land_von = |ort: &Ort| {
+            flaechen
+                .iter()
+                .find(|(_, f)| f.enthaelt(ort.lat, ort.lon))
+                .map(|(g, _)| *g)
+        };
 
         // Mit Staatsgrenzen bleiben nur die Orte in DACH, ohne sie (Teilauszüge) alle.
         let mit_staaten = flaechen.iter().any(|(g, _)| g.ebene == 2);
@@ -234,7 +243,10 @@ impl Orte {
                 .then(|| naechstgroessere_stadt(id, ort, &staedte))
                 .flatten();
             let land = land.map(|g| laender[&g.land()]);
-            zeilen.insert(id, eintrag_json(ort, land, bei.map_or("", |s| s.name.as_str())));
+            zeilen.insert(
+                id,
+                eintrag_json(ort, land, bei.map_or("", |s| s.name.as_str())),
+            );
             let mut schluessel = BTreeSet::new();
             for name in std::iter::once(&ort.name).chain(ort.namen.iter().map(|(_, n)| n)) {
                 for (i, wort) in woerter(name).iter().enumerate() {
@@ -244,14 +256,20 @@ impl Orte {
                 }
             }
             for s in schluessel {
-                teile.entry(s).or_default().push((ort.groesse, &ort.name, id));
+                teile
+                    .entry(s)
+                    .or_default()
+                    .push((ort.groesse, &ort.name, id));
             }
         }
         let mut dateien = BTreeMap::new();
         for (schluessel, eintraege) in &mut teile {
             eintraege.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)).then(a.2.cmp(&b.2)));
             let zeilen: Vec<&str> = eintraege.iter().map(|e| zeilen[&e.2].as_str()).collect();
-            dateien.insert(format!("{schluessel}.json"), format!("[\n{}\n]\n", zeilen.join(",\n")));
+            dateien.insert(
+                format!("{schluessel}.json"),
+                format!("[\n{}\n]\n", zeilen.join(",\n")),
+            );
         }
 
         let anzahl = orte.len();
@@ -281,8 +299,8 @@ impl Orte {
     }
 
     /// Fläche innerhalb der Grenze, oder warum es keine gibt. Fehlen einzelne Wege (der DACH-Auszug schneidet etwa die
-    /// Grenze im Genfersee ab), schließen gerade Linien zwischen den offenen Enden die Ringe, solange sie zusammen
-    /// höchstens `MAX_LUECKEN_KM` lang sind.
+    /// Grenze im Genfersee ab), schließen gerade Linien zwischen den offenen Enden die Ringe, solange höchstens
+    /// `MAX_ANTEIL_FEHLT` der Wege fehlen und die Linien zusammen höchstens `MAX_LUECKEN_KM` lang sind.
     fn flaeche(&self, grenze: &Grenze) -> Result<(Flaeche, f64), String> {
         let mut kanten = Vec::new();
         let mut enden: HashMap<i64, u32> = HashMap::new();
@@ -298,7 +316,8 @@ impl Orte {
                 *enden.entry(erster).or_default() += 1;
                 *enden.entry(letzter).or_default() += 1;
             }
-            let punkte: Option<Vec<(f64, f64)>> = knoten.iter().map(|k| self.knoten.get(k).copied()).collect();
+            let punkte: Option<Vec<(f64, f64)>> =
+                knoten.iter().map(|k| self.knoten.get(k).copied()).collect();
             match punkte {
                 Some(p) => kanten.extend(p.windows(2).map(|p| (p[0], p[1]))),
                 None => ohne_knoten += 1,
@@ -325,17 +344,30 @@ impl Orte {
             kanten.push((a, offen.swap_remove(i)));
             luecken += km;
         }
-        if ohne_knoten > 0 || kanten.is_empty() || luecken > MAX_LUECKEN_KM {
+        let anteil = ohne_weg as f64 / grenze.wege.len().max(1) as f64;
+        if ohne_knoten > 0
+            || kanten.is_empty()
+            || anteil > MAX_ANTEIL_FEHLT
+            || luecken > MAX_LUECKEN_KM
+        {
             return Err(format!(
-                "{ohne_weg} Wege fehlen, {ohne_knoten} Wegen fehlen Knoten, Lücken {luecken:.0} km"
+                "{ohne_weg} von {} Wegen fehlen, {ohne_knoten} Wegen fehlen Knoten, Lücken {luecken:.0} km",
+                grenze.wege.len()
             ));
         }
         Ok((Flaeche::neu(kanten), luecken))
     }
 }
 
-fn fund_ort<'a>(id: i64, lat: f64, lon: f64, tags: impl Iterator<Item = (&'a str, &'a str)>) -> Vec<Fund> {
-    ort(lat, lon, tags).map(|o| vec![Fund::Ort(id, o)]).unwrap_or_default()
+fn fund_ort<'a>(
+    id: i64,
+    lat: f64,
+    lon: f64,
+    tags: impl Iterator<Item = (&'a str, &'a str)>,
+) -> Vec<Fund> {
+    ort(lat, lon, tags)
+        .map(|o| vec![Fund::Ort(id, o)])
+        .unwrap_or_default()
 }
 
 /// Der Knoten als Ort, wenn er eine der `ARTEN` ist und einen Namen hat
@@ -348,7 +380,10 @@ fn ort<'a>(lat: f64, lon: f64, tags: impl Iterator<Item = (&'a str, &'a str)>) -
             "name" => name = Some(v.trim()),
             "population" => einwohner = zahl_aus(v),
             _ => {
-                if let Some(sprache) = SPRACHEN.iter().find(|s| k.strip_prefix("name:") == Some(**s)) {
+                if let Some(sprache) = SPRACHEN
+                    .iter()
+                    .find(|s| k.strip_prefix("name:") == Some(**s))
+                {
                     namen.push((*sprache, v.trim().to_string()));
                 }
             }
@@ -374,7 +409,12 @@ fn grenze<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>, wege: Vec<i64>) ->
         return None;
     }
     let (ebene, staat) = match tags.get("admin_level") {
-        Some(&"2") => (2, tags.get("ISO3166-1").or(tags.get("ISO3166-1:alpha2"))?.to_string()),
+        Some(&"2") => (
+            2,
+            tags.get("ISO3166-1")
+                .or(tags.get("ISO3166-1:alpha2"))?
+                .to_string(),
+        ),
         Some(&"4") => (4, tags.get("ISO3166-2")?.split_once('-')?.0.to_string()),
         _ => return None,
     };
@@ -382,7 +422,11 @@ fn grenze<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>, wege: Vec<i64>) ->
         return None;
     }
     let name = tags.get("name")?;
-    let in_sprache = |s: &str| tags.get(format!("name:{s}").as_str()).unwrap_or(name).to_string();
+    let in_sprache = |s: &str| {
+        tags.get(format!("name:{s}").as_str())
+            .unwrap_or(name)
+            .to_string()
+    };
     Some(Grenze {
         ebene,
         staat,
@@ -396,7 +440,9 @@ fn zahl_aus(v: &str) -> Option<u32> {
     let ziffern: String = v
         .trim_start_matches(|c: char| !c.is_ascii_digit())
         .chars()
-        .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | ' ' | '\'' | '\u{a0}' | '\u{202f}'))
+        .take_while(|c| {
+            c.is_ascii_digit() || matches!(c, '.' | ',' | ' ' | '\'' | '\u{a0}' | '\u{202f}')
+        })
         .filter(char::is_ascii_digit)
         .collect();
     ziffern.parse().ok().filter(|&n| n > 0)
@@ -417,7 +463,11 @@ fn in_bereichen(ort: &Ort, bereiche: &[TileRange]) -> bool {
 
 /// Die Stadt, auf die man sich bei einem Ort bezieht: die nächste, wobei größere Städte weiter weg sein dürfen
 /// (Entfernung geteilt durch die dritte Wurzel der Größe, kleinste gewinnt).
-fn naechstgroessere_stadt<'a>(id: i64, ort: &Ort, staedte: &[(i64, &'a Ort, f64)]) -> Option<&'a Ort> {
+fn naechstgroessere_stadt<'a>(
+    id: i64,
+    ort: &Ort,
+    staedte: &[(i64, &'a Ort, f64)],
+) -> Option<&'a Ort> {
     let breite = ort.lat.to_radians().cos();
     staedte
         .iter()
@@ -437,7 +487,13 @@ fn eintrag_json(ort: &Ort, land: Option<usize>, bei: &str) -> String {
     s.push(',');
     json_string(&mut s, ARTEN[ort.art].0);
     let land = land.map_or("null".to_string(), |l| l.to_string());
-    let _ = write!(s, ",{},{},{},{land},", grad(ort.lon), grad(ort.lat), ort.groesse);
+    let _ = write!(
+        s,
+        ",{},{},{},{land},",
+        grad(ort.lon),
+        grad(ort.lat),
+        ort.groesse
+    );
     json_string(&mut s, bei);
     if !ort.namen.is_empty() {
         s.push_str(",{");
@@ -512,8 +568,15 @@ pub(crate) fn woerter(name: &str) -> Vec<String> {
             },
         }
     }
-    gefaltet.split(' ').filter(|w| !w.is_empty()).map(String::from).collect()
+    gefaltet
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .map(String::from)
+        .collect()
 }
+
+/// Kante einer Grenze: (Breite, Länge) von Anfang und Ende
+type Kante = ((f64, f64), (f64, f64));
 
 /// Fläche innerhalb einer Grenze für die Strahlprobe: alle Kanten der Grenze, nach Breitenstreifen sortiert
 struct Flaeche {
@@ -522,11 +585,11 @@ struct Flaeche {
     nord: f64,
     ost: f64,
     /// je Streifen die Kanten, die ihn berühren: (Breite, Länge) von Anfang und Ende
-    streifen: Vec<Vec<((f64, f64), (f64, f64))>>,
+    streifen: Vec<Vec<Kante>>,
 }
 
 impl Flaeche {
-    fn neu(kanten: Vec<((f64, f64), (f64, f64))>) -> Flaeche {
+    fn neu(kanten: Vec<Kante>) -> Flaeche {
         let punkte = || kanten.iter().flat_map(|&(a, b)| [a, b]);
         let sued = punkte().map(|p| p.0).fold(f64::INFINITY, f64::min);
         let nord = punkte().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);

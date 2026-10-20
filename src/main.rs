@@ -61,13 +61,21 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_orte(out: &Path, ranges: &[TileRange], inputs: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn run_orte(
+    out: &Path,
+    ranges: &[TileRange],
+    inputs: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
     let t0 = Instant::now();
     let mut orte = Orte::default();
     for input in inputs {
         orte.read_pbf(Path::new(input))
             .map_err(|e| format!("{input}: {e}"))?;
-        println!("gelesen: {input} ({:.1} s){}", t0.elapsed().as_secs_f64(), speicher());
+        println!(
+            "gelesen: {input} ({:.1} s){}",
+            t0.elapsed().as_secs_f64(),
+            speicher()
+        );
     }
     let verzeichnis = orte.verzeichnis(ranges);
     for meldung in &verzeichnis.meldungen {
