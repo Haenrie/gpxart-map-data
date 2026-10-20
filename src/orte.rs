@@ -32,6 +32,8 @@ const SCHLUESSEL: usize = 2;
 const WORT_MIN: usize = 3;
 /// Breite der Streifen, in die die Grenzen für die Strahlprobe geteilt sind (Grad)
 const STREIFEN: f64 = 0.02;
+/// So lang dürfen die Lücken in einer Grenze zusammen sein, die gerade Linien schließen (km)
+const MAX_LUECKEN_KM: f64 = 100.0;
 
 #[derive(Clone)]
 struct Ort {
@@ -73,8 +75,8 @@ pub struct Ortsverzeichnis {
     pub dateien: BTreeMap<String, String>,
     pub orte: usize,
     pub laender: usize,
-    /// Grenzen, denen in der Eingabe Wege oder Knoten fehlen; sie bleiben unberücksichtigt.
-    pub unvollstaendig: Vec<String>,
+    /// Grenzen, deren Lücken geschlossen sind, und unvollständige, die unberücksichtigt bleiben
+    pub meldungen: Vec<String>,
 }
 
 impl Grenze {
@@ -180,12 +182,18 @@ impl Orte {
     /// zählen trotzdem alle.
     pub fn verzeichnis(&self, bereiche: &[TileRange]) -> Ortsverzeichnis {
         // Länder und Staaten mit vollständiger Grenze; Orte bekommen das Land, sonst den Staat (Liechtenstein).
-        let mut unvollstaendig = Vec::new();
+        let mut meldungen = Vec::new();
         let mut flaechen: Vec<(&Grenze, Flaeche)> = Vec::new();
         for grenze in self.grenzen.values() {
+            let name = format!("{} ({})", grenze.name[0], grenze.staat);
             match self.flaeche(grenze) {
-                Some(f) => flaechen.push((grenze, f)),
-                None => unvollstaendig.push(format!("{} ({})", grenze.name[0], grenze.staat)),
+                Ok((f, luecken)) => {
+                    if luecken > 0.0 {
+                        meldungen.push(format!("{name}: Lücken {luecken:.1} km geschlossen"));
+                    }
+                    flaechen.push((grenze, f));
+                }
+                Err(e) => meldungen.push(format!("{name}: unvollständig, nicht berücksichtigt ({e})")),
             }
         }
         flaechen.sort_by_key(|(g, _)| std::cmp::Reverse(g.ebene));
@@ -268,29 +276,61 @@ impl Orte {
             dateien,
             orte: anzahl,
             laender: laender.len(),
-            unvollstaendig,
+            meldungen,
         }
     }
 
-    /// Fläche innerhalb der Grenze, oder `None`, wenn Wege oder Knoten fehlen oder die Wege keine Ringe schließen
-    fn flaeche(&self, grenze: &Grenze) -> Option<Flaeche> {
+    /// Fläche innerhalb der Grenze, oder warum es keine gibt. Fehlen einzelne Wege (der DACH-Auszug schneidet etwa die
+    /// Grenze im Genfersee ab), schließen gerade Linien zwischen den offenen Enden die Ringe, solange sie zusammen
+    /// höchstens `MAX_LUECKEN_KM` lang sind.
+    fn flaeche(&self, grenze: &Grenze) -> Result<(Flaeche, f64), String> {
         let mut kanten = Vec::new();
         let mut enden: HashMap<i64, u32> = HashMap::new();
+        let (mut ohne_weg, mut ohne_knoten) = (0, 0);
         let wege: BTreeSet<i64> = grenze.wege.iter().copied().collect();
         for id in wege {
-            let knoten = self.wege.get(&id)?;
-            let (&erster, &letzter) = (knoten.first()?, knoten.last()?);
+            let Some(knoten) = self.wege.get(&id).filter(|k| !k.is_empty()) else {
+                ohne_weg += 1;
+                continue;
+            };
+            let (erster, letzter) = (knoten[0], knoten[knoten.len() - 1]);
             if erster != letzter {
                 *enden.entry(erster).or_default() += 1;
                 *enden.entry(letzter).or_default() += 1;
             }
             let punkte: Option<Vec<(f64, f64)>> = knoten.iter().map(|k| self.knoten.get(k).copied()).collect();
-            kanten.extend(punkte?.windows(2).map(|p| (p[0], p[1])));
+            match punkte {
+                Some(p) => kanten.extend(p.windows(2).map(|p| (p[0], p[1]))),
+                None => ohne_knoten += 1,
+            }
         }
-        if kanten.is_empty() || enden.values().any(|n| n % 2 == 1) {
-            return None;
+        // Offene Enden paarweise verbinden, jeweils mit dem nächsten
+        let mut offen: Vec<(f64, f64)> = enden
+            .iter()
+            .filter(|(_, n)| *n % 2 == 1)
+            .filter_map(|(k, _)| self.knoten.get(k).copied())
+            .collect();
+        offen.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        let mut luecken = 0.0;
+        while let Some(a) = offen.pop() {
+            let Some((i, km)) = offen
+                .iter()
+                .map(|&b| km(a, b))
+                .enumerate()
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+            else {
+                luecken = f64::INFINITY;
+                break;
+            };
+            kanten.push((a, offen.swap_remove(i)));
+            luecken += km;
         }
-        Some(Flaeche::neu(kanten))
+        if ohne_knoten > 0 || kanten.is_empty() || luecken > MAX_LUECKEN_KM {
+            return Err(format!(
+                "{ohne_weg} Wege fehlen, {ohne_knoten} Wegen fehlen Knoten, Lücken {luecken:.0} km"
+            ));
+        }
+        Ok((Flaeche::neu(kanten), luecken))
     }
 }
 
@@ -360,6 +400,13 @@ fn zahl_aus(v: &str) -> Option<u32> {
         .filter(char::is_ascii_digit)
         .collect();
     ziffern.parse().ok().filter(|&n| n > 0)
+}
+
+/// Entfernung zweier Punkte (Breite, Länge) in km, für Strecken bis einige 100 km genau genug
+fn km((lat1, lon1): (f64, f64), (lat2, lon2): (f64, f64)) -> f64 {
+    let x = (lon2 - lon1) * ((lat1 + lat2) / 2.0).to_radians().cos() * 111.32;
+    let y = (lat2 - lat1) * 110.57;
+    x.hypot(y)
 }
 
 fn in_bereichen(ort: &Ort, bereiche: &[TileRange]) -> bool {

@@ -70,8 +70,8 @@ fn run_orte(out: &Path, ranges: &[TileRange], inputs: &[String]) -> Result<(), B
         println!("gelesen: {input} ({:.1} s){}", t0.elapsed().as_secs_f64(), speicher());
     }
     let verzeichnis = orte.verzeichnis(ranges);
-    for grenze in &verzeichnis.unvollstaendig {
-        println!("unvollständig, nicht berücksichtigt: {grenze}");
+    for meldung in &verzeichnis.meldungen {
+        println!("{meldung}");
     }
     fs::create_dir_all(out)?;
     let (mut bytes, mut groesster) = (0, (0, ""));
