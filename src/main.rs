@@ -1,51 +1,99 @@
-//! Kommandozeile: Wegegraph-Kacheln aus `.osm.pbf` bauen.
+//! Kommandozeile: Wegegraph-Kacheln und Ortsverzeichnis aus `.osm.pbf` bauen.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 use std::{env, fs};
 
-use wegegraph::{OsmExtract, TileRange, build_tiles};
+use wegegraph::{Orte, OsmExtract, TileRange, build_tiles};
 
 const USAGE: &str = "\
 Aufruf: wegegraph <ausgabe-ordner> [<x0>-<x1> <y0>-<y1>] <eingabe.osm.pbf>...
+        wegegraph orte <ausgabe-ordner> [<x0>-<x1> <y0>-<y1>]... <eingabe.osm.pbf>...
 
 Baut den Wegegraphen (Format 2, alle Fortbewegungsarten) für alle z12-Kacheln x0..=x1, y0..=y1, ohne Bereich für
 alle Kacheln mit Wegen, und schreibt sie als <ausgabe-ordner>/12/<x>/<y>.bin. Kacheln ohne Wege entfallen.
+Mit „orte“ entsteht stattdessen das Ortsverzeichnis (Format 1) als <ausgabe-ordner>/index.json und
+<ausgabe-ordner>/<teil>.json, mit Bereichen nur für die Orte in diesen Kacheln.
 Mehrere Eingabedateien werden zusammengeführt.
 Beispiele: wegegraph graph/test 2169-2173 1421-1424 oberbayern.osm.pbf schwaben.osm.pbf
-           wegegraph graph/2026-10-18 dach.osm.pbf";
+           wegegraph graph/2026-10-18 dach.osm.pbf
+           wegegraph orte orte/2026-10-18/orte dach.osm.pbf";
 
 /// Kachelzeilen je Streifen: Ein Streifen von ganz DACH braucht beim Bau gut 1 GB Speicher.
 const STREIFEN: u32 = 8;
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    let range = match (
-        args.get(1).and_then(|s| span(s)),
-        args.get(2).and_then(|s| span(s)),
-    ) {
-        (Some((x0, x1)), Some((y0, y1))) => Some(TileRange { x0, x1, y0, y1 }),
-        _ => None,
+    let (orte, args) = match args.split_first() {
+        Some((befehl, rest)) if befehl == "orte" => (true, rest),
+        _ => (false, &args[..]),
     };
-    let inputs = args
-        .get(if range.is_some() { 3 } else { 1 }..)
-        .unwrap_or_default();
-    let Some(out) = args.first().map(PathBuf::from) else {
+    let Some((out, mut inputs)) = args.split_first() else {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
+    // Bereiche: beim Wegegraphen höchstens einer, beim Ortsverzeichnis beliebig viele
+    let mut ranges = Vec::new();
+    while let [x, y, rest @ ..] = inputs
+        && let (Some((x0, x1)), Some((y0, y1))) = (span(x), span(y))
+        && (orte || ranges.is_empty())
+    {
+        ranges.push(TileRange { x0, x1, y0, y1 });
+        inputs = rest;
+    }
     if inputs.is_empty() {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     }
-    match run(&out, range, inputs) {
+    let out = PathBuf::from(out);
+    let ergebnis = if orte {
+        run_orte(&out, &ranges, inputs)
+    } else {
+        run(&out, ranges.first().copied(), inputs)
+    };
+    match ergebnis {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("Fehler: {e}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn run_orte(out: &Path, ranges: &[TileRange], inputs: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let t0 = Instant::now();
+    let mut orte = Orte::default();
+    for input in inputs {
+        orte.read_pbf(Path::new(input))
+            .map_err(|e| format!("{input}: {e}"))?;
+        println!("gelesen: {input} ({:.1} s){}", t0.elapsed().as_secs_f64(), speicher());
+    }
+    let verzeichnis = orte.verzeichnis(ranges);
+    for grenze in &verzeichnis.unvollstaendig {
+        println!("unvollständig, nicht berücksichtigt: {grenze}");
+    }
+    fs::create_dir_all(out)?;
+    let (mut bytes, mut groesster) = (0, (0, ""));
+    for (name, inhalt) in &verzeichnis.dateien {
+        fs::write(out.join(name), inhalt)?;
+        bytes += inhalt.len();
+        if inhalt.len() > groesster.0 {
+            groesster = (inhalt.len(), name);
+        }
+    }
+    println!(
+        "{} Orte in {} Ländern, {} Dateien, {:.2} MB, größte {} mit {:.0} kB ({:.1} s){}",
+        verzeichnis.orte,
+        verzeichnis.laender,
+        verzeichnis.dateien.len(),
+        bytes as f64 / 1e6,
+        groesster.1,
+        groesster.0 as f64 / 1e3,
+        t0.elapsed().as_secs_f64(),
+        speicher()
+    );
+    Ok(())
 }
 
 fn run(

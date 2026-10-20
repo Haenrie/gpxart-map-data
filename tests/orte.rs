@@ -59,9 +59,10 @@ fn staedte_doerfer_und_stadtteile_kommen_unter_jedem_wortanfang_ins_verzeichnis(
 #[test]
 fn gleichnamige_orte_unterscheiden_sich_durch_land_und_naechstgroessere_stadt() {
     let mut orte = Orte::default();
-    // Zwei Länder als Rechtecke: Bayern aus zwei Wegen, Hessen aus einem geschlossenen Weg.
-    rechteck(&mut orte, 100, (47.0, 9.0), (49.0, 12.0), "Bayern", "Bavaria", "DE-BY", true);
-    rechteck(&mut orte, 200, (49.5, 8.0), (51.5, 10.0), "Hessen", "Hesse", "DE-HE", false);
+    // Ein Staat mit zwei Ländern, alle als Rechtecke; Bayern aus zwei Wegen, die anderen aus je einem geschlossenen.
+    rechteck(&mut orte, 100, (47.0, 9.0), (49.0, 12.0), "4", "Bayern", "Bavaria", "DE-BY", true);
+    rechteck(&mut orte, 200, (49.5, 8.0), (51.5, 10.0), "4", "Hessen", "Hesse", "DE-HE", false);
+    rechteck(&mut orte, 300, (47.0, 8.0), (52.0, 12.0), "2", "Deutschland", "Germany", "DE", false);
     for (id, lat, lon, place, name) in [
         (1, 48.0478, 10.8688, "town", "Landsberg am Lech"),
         (2, 48.0600, 10.9000, "village", "Neustadt"),
@@ -90,13 +91,15 @@ fn gleichnamige_orte_unterscheiden_sich_durch_land_und_naechstgroessere_stadt() 
     assert!(verzeichnis.teil("st").is_none(), "außerhalb der Länder kein Ort");
 }
 
-/// Ein Land als Rechteck (Süd-West, Nord-Ost), als Grenz-Relation `boundary=administrative`, `admin_level=4`.
+/// Ein Land (`admin_level=4`) oder Staat (`2`) als Rechteck (Süd-West, Nord-Ost), als Grenz-Relation
+/// `boundary=administrative`.
 #[allow(clippy::too_many_arguments)]
 fn rechteck(
     orte: &mut Orte,
     id: i64,
     (s, w): (f64, f64),
     (n, o): (f64, f64),
+    admin_level: &str,
     de: &str,
     en: &str,
     iso: &str,
@@ -116,10 +119,10 @@ fn rechteck(
     let tags = [
         ("type", "boundary"),
         ("boundary", "administrative"),
-        ("admin_level", "4"),
+        ("admin_level", admin_level),
         ("name", de),
         ("name:en", en),
-        ("ISO3166-2", iso),
+        (if admin_level == "2" { "ISO3166-1" } else { "ISO3166-2" }, iso),
     ];
     orte.add_relation(id, &wege, &tags);
 }

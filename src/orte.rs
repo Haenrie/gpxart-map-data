@@ -191,12 +191,13 @@ impl Orte {
         flaechen.sort_by_key(|(g, _)| std::cmp::Reverse(g.ebene));
         let land_von = |ort: &Ort| flaechen.iter().find(|(_, f)| f.enthaelt(ort.lat, ort.lon)).map(|(g, _)| *g);
 
-        // Ohne Grenzen (Teilauszüge) bleiben alle Orte, sonst nur die in DACH.
+        // Mit Staatsgrenzen bleiben nur die Orte in DACH, ohne sie (Teilauszüge) alle.
+        let mit_staaten = flaechen.iter().any(|(g, _)| g.ebene == 2);
         let orte: Vec<(i64, &Ort, Option<&Grenze>)> = self
             .orte
             .iter()
             .map(|(&id, ort)| (id, ort, land_von(ort)))
-            .filter(|(_, _, land)| land.is_some() || flaechen.is_empty())
+            .filter(|(_, _, land)| land.is_some() || !mit_staaten)
             .collect();
         let staedte: Vec<(i64, &Ort, f64)> = orte
             .iter()
