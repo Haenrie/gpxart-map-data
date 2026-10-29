@@ -180,19 +180,28 @@ nur `wegegraph.tar.gz` (DACH, mit Zeiger und Lizenz) und `ortsverzeichnis.tar.gz
 
 gpxart.com holt jedes Quartal das neueste Release ab und liefert es aus; dieses Repo braucht dafür keine Zugangsdaten.
 
-## Größen und Grenzen (DACH, gemessen)
+## Größen und Grenzen (gemessen)
 
-Geofabrik `dach-261018.osm.pbf` (6,25 GB, OSM-Daten vom 18.10.2026):
+Probelauf auf GitHub Actions mit den Geofabrik-Auszügen vom 28.10.2026 (Lauf 40879450270, 40 min für alles; die
+Regionen laufen nebeneinander):
 
-| | gemessen | Grenze |
-|---|---|---|
-| Kacheln (Dateien) | 14 255, mit Ortsverzeichnis und Zeiger 14 583 | (bis gpxart.com #84: 20 000 Dateien je Worker) |
-| Größte Kachel | 1,38 MB (`12/2200/1343`, Berlin-Mitte) | 25 MiB je Datei |
-| Alle Kacheln | 1,23 GB, gepackt 658 MB | 2 GiB je Release-Datei (GitHub) |
-| Wege, Knoten im PBF | 20,8 Mio. Wege, 125 Mio. Knoten | |
-| Graph | 76,8 Mio. Knoten, 84,2 Mio. Kanten | |
-| Bau auf GitHub Actions ([erstes Release](https://github.com/Haenrie/gpxart-map-data/releases/tag/2026-10-18-cf1e32f)) | Builder 7 min 13 s (davon Lesen 5 min 8 s), höchstens 6,4 GiB (Max RSS); ganzer Lauf 20 min, davon Download 10 min | 16 GB RAM (15 GiB nutzbar), Platte (86 GB frei, gebraucht gut 8 GB), 6 h je Job |
-| Bau auf einem Windows-PC | 4½–5 min (davon Lesen 3½ min), höchstens 6,0 GiB (Working Set) | |
+| Region | Auszug | Kacheln | Größe, gepackt | größte Kachel | Randwege (Schritt 1) | Kacheln (Schritt 2) |
+|---|---|---|---|---|---|---|
+| `dach` | 6,26 GB | 14 180 | 1,23 GB, 659 MB | 1,38 MB (`12/2200/1343`, Berlin-Mitte) | 5 min 9 s, 6,5 GiB | 7 min 33 s, 6,6 GiB |
+| `france` | 5,11 GB | 16 129 | 967 MB, 525 MB | 1,83 MB (`12/2074/1409`, Paris) | 3 min 57 s, 5,2 GiB | 5 min 9 s, 5,2 GiB |
+| `andorra` | 3,5 MB | 133 | 1,1 MB, 0,6 MB | 0,28 MB | 0,2 s | 0,3 s |
+| `monaco` | 0,7 MB | 0 (gehören `france`) | – | – | 0,02 s | 0,02 s |
+| zusammen | | 30 442 | 2,20 GB, 1,18 GB | | | |
+
+Zeiten und Speicher (Max RSS) gelten für den Builder; dazu kommen je Region der Download von Geofabrik (DACH 11 min,
+Frankreich 13 min), die Ortsliste (je gut 2½ min, 0,3 GiB) und die Übergabe des Auszugs als Artefakt (1–7 min). Grenzen:
+16 GB RAM (15 GiB nutzbar), 6 h je Job, je Kachel 25 MiB, je Release-Datei 2 GiB; Platte hatte der Runner im Probelauf
+86 GB frei, gebraucht werden je Job gut 8 GB. Der Speicher wächst mit dem Auszug (gut 1 GiB je GB PBF); bis ≈ 10 GB PBF
+je Region reicht der Runner, die Welt also in Ländern und bei großen Ländern in Geofabriks Teilauszügen.
+
+Frühere Messung, ganz DACH in einem Stück (`dach-261018`, erstes Release): 14 255 Kacheln, 20,8 Mio. Wege und 125 Mio.
+Knoten im PBF, Graph 76,8 Mio. Knoten und 84,2 Mio. Kanten; Builder 7 min 13 s, 6,4 GiB; auf einem Windows-PC
+4½–5 min, 6,0 GiB.
 
 Den Speicher bestimmt vor allem das Lesen (5,6 GiB): Knoten-IDs, die `osmpbf` beim Lesen sammelt, dazu alle Knoten (16
 Byte) und Wege. Das Schneiden in Streifen braucht danach knapp 1 GiB mehr.
@@ -200,7 +209,10 @@ Byte) und Wege. Das Schneiden in Streifen braucht danach knapp 1 GiB mehr.
 Zu den Kacheln gehören auch Fährlinien aus DACH heraus (z. B. nach Skandinavien); deshalb reicht der gebaute Bereich
 über DACH hinaus.
 
-**Ortsverzeichnis** (gleiche Daten, Windows-PC): 126 417 Orte (101 Großstädte, 2 621 Städte, 7 410 Stadtteile,
+**Ortsverzeichnis** aller Regionen (Probelauf): 401 263 Orte in 68 Ländern (Bundesländer, Kantone, Régions, dazu
+Liechtenstein, Monaco, Andorra), 423 Dateien, 39,8 MB, Bau aus den Ortslisten 8 s. Französische Namen beginnen oft mit
+Le/La/Les: `le.json` hat 74 493 Einträge, 4,6 MB (gzip 1,1 MB), `la.json` 4,3 MB; die übrigen Teile höchstens 1,3 MB.
+DACH allein (`dach-261018`, Windows-PC): 126 417 Orte (101 Großstädte, 2 621 Städte, 7 410 Stadtteile,
 1 886 Viertel, 46 410 Dörfer, 67 988 Weiler) in 52 Ländern und Kantonen; 324 Teile und `index.json`, zusammen 8,6 MB,
 gepackt (gzip) 2,8 MB. Ein Abruf beim Tippen ist meist wenige kB groß, der größte Teil (`sc.json`) 319 kB, gepackt
 96 kB. Bau gut 2 min (fast nur Lesen), höchstens 0,5 GiB Speicher. Im Genfersee fehlen dem Auszug fünf Wege der
