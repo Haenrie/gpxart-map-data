@@ -312,7 +312,8 @@ jobs:
       - name: Prüfen und packen
         run: |
           kacheln=$(find "graph/$VERSION" -name '*.bin' | wc -l)
-          read -r groesste groesste_kachel < <(find "graph/$VERSION" -name '*.bin' -printf '%s %P\n' | sort -n | tail -1 || true)
+          # Eine Region kann ohne eigene Kachel sein (Monaco: seine Kacheln gehören Frankreich).
+          read -r groesste groesste_kachel < <(find "graph/$VERSION" -name '*.bin' -printf '%s %P\n' | sort -n | tail -1) || true
           summe=$(find "graph/$VERSION" -name '*.bin' -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
           archiv="wegegraph-$NAME.tar.gz"
           tar -C graph -czf "$archiv" "$VERSION"

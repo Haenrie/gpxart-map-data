@@ -196,8 +196,9 @@ Auto, Gesamthinweis „Ohne Wege“), stehen nicht im Graphen.
   damit jede Länge in `u16` passt.
 - **Kanten:** Die Geometrie einer Kante ist die gerade Linie zwischen ihren Knoten; sie weicht höchstens 2 m vom
   OSM-Weg ab. Sie steht in der Kachel, in der ihr Stück des OSM-Weges liegt; liegt sie genau auf einer Kachelgrenze,
-  kann das jede der beiden Kacheln sein. Ihre **Länge** ist die echte Länge entlang des OSM-Weges (Großkreis, Erdradius 6 371 008,8 m). Sie ist
-  nie kürzer als die Luftlinie zwischen den Knoten, bis auf Rundung (höchstens ≈ 0,3 m).
+  kann das jede der beiden Kacheln sein. Ihre **Länge** ist die echte Länge entlang des OSM-Weges (Großkreis,
+  Erdradius 6 371 008,8 m). Sie ist nie kürzer als die Luftlinie zwischen den Knoten, bis auf Rundung (höchstens
+  ≈ 0,3 m).
   Verbinden mehrere Kanten dieselben zwei Knoten und haben sie in allen vier Stellen-Abschnitten dieselbe Klasse, bleibt
   nur die kürzeste. Kanten mit verschiedenen Stellen bleiben nebeneinander stehen (Mehrfachkanten).
 - Alle Zusammenhangskomponenten bleiben erhalten. Welche der Router nutzt (z. B. nur die größte im Gebiet),
