@@ -2,7 +2,7 @@
 //! Dateien des Verzeichnisses werden hier unabhängig vom Builder nach `docs/ortsverzeichnis-format.md` gelesen.
 
 use serde_json::Value;
-use wegegraph::Orte;
+use wegegraph::{Orte, Ortsverzeichnis};
 
 #[test]
 fn staedte_doerfer_und_stadtteile_kommen_unter_jedem_wortanfang_ins_verzeichnis() {
@@ -150,6 +150,136 @@ fn gleichnamige_orte_unterscheiden_sich_durch_land_und_naechstgroessere_stadt() 
         verzeichnis.teil("st").is_none(),
         "außerhalb der Länder kein Ort"
     );
+}
+
+/// Zwei Regionen (gpxart.com #85) mit sich überlappenden Auszügen: Jede bringt nur die Orte ihrer Staaten mit, und aus
+/// beiden Ortslisten entsteht dasselbe Verzeichnis wie aus beiden Auszügen in einem Stück.
+#[test]
+fn ortslisten_der_regionen_ergeben_das_verzeichnis_wie_in_einem_stueck() {
+    // Auszüge, die je etwas über die Grenze am Rhein (7,8° O) reichen; Grand Est ohne den Westen, Baden-Württemberg
+    // ohne den Osten, aber beide Staaten vollständig
+    let land = |orte: &mut Orte| {
+        rechteck(
+            orte,
+            100,
+            (47.5, 7.8),
+            (49.0, 10.0),
+            "4",
+            "Baden-Württemberg",
+            "Baden-Württemberg",
+            "DE-BW",
+            false,
+        );
+        rechteck(
+            orte,
+            200,
+            (47.5, 6.0),
+            (49.0, 7.8),
+            "4",
+            "Grand Est",
+            "Grand Est",
+            "FR-GES",
+            false,
+        );
+        rechteck(
+            orte,
+            300,
+            (47.5, 7.8),
+            (49.0, 10.0),
+            "2",
+            "Deutschland",
+            "Germany",
+            "DE",
+            false,
+        );
+        rechteck(
+            orte,
+            400,
+            (47.5, 6.0),
+            (49.0, 7.8),
+            "2",
+            "Frankreich",
+            "France",
+            "FR",
+            false,
+        );
+    };
+    let ort =
+        |orte: &mut Orte, id, lat, lon, place, name, namen: &[(&'static str, &'static str)]| {
+            let mut tags = vec![("place", place), ("name", name)];
+            tags.extend(namen);
+            orte.add_node(id, lat, lon, &tags);
+        };
+    let strassburg = |orte: &mut Orte| {
+        ort(
+            orte,
+            1,
+            48.5734,
+            7.7521,
+            "city",
+            "Strasbourg",
+            &[("name:de", "Straßburg"), ("population", "291313")],
+        )
+    };
+    let kehl = |orte: &mut Orte| ort(orte, 2, 48.5863, 7.8250, "suburb", "Kehl-Sundheim", &[]);
+    let mut west = Orte::fuer_staaten(&["FR".to_string()]);
+    let mut ost = Orte::fuer_staaten(&["DE".to_string()]);
+    let mut ganz = Orte::default();
+    for orte in [&mut west, &mut ost, &mut ganz] {
+        land(orte);
+        strassburg(orte);
+        kehl(orte);
+    }
+    ort(
+        &mut west,
+        3,
+        48.4,
+        7.5,
+        "village",
+        "Dorf\tmit Tabulator \\ und Schrägstrich",
+        &[],
+    );
+    ort(
+        &mut ganz,
+        3,
+        48.4,
+        7.5,
+        "village",
+        "Dorf\tmit Tabulator \\ und Schrägstrich",
+        &[],
+    );
+    ort(
+        &mut ost,
+        4,
+        48.4,
+        8.0,
+        "village",
+        "Neuried",
+        &[("name:en", "New Ried")],
+    );
+    ort(
+        &mut ganz,
+        4,
+        48.4,
+        8.0,
+        "village",
+        "Neuried",
+        &[("name:en", "New Ried")],
+    );
+
+    let (liste_west, anzahl_west, _) = west.ortsliste();
+    let (liste_ost, anzahl_ost, _) = ost.ortsliste();
+    assert_eq!(
+        (anzahl_west, anzahl_ost),
+        (2, 2),
+        "jede Region nur mit den Orten ihres Staates"
+    );
+    let verzeichnis = Ortsverzeichnis::aus_listen(&[liste_west, liste_ost]).unwrap();
+    assert_eq!(verzeichnis.orte, 4);
+    assert_eq!(verzeichnis.dateien, ganz.verzeichnis(&[]).dateien);
+    // Ein Stadtteil von Kehl nennt die nahe Großstadt jenseits der Grenze
+    let kehl: Value = serde_json::from_str(&verzeichnis.dateien["ke.json"]).unwrap();
+    assert_eq!(kehl[0][6], "Strasbourg");
 }
 
 /// Ein Land (`admin_level=4`) oder Staat (`2`) als Rechteck (Süd-West, Nord-Ost), als Grenz-Relation
