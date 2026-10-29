@@ -111,16 +111,21 @@ So baut jede Region ihre Kacheln aus **allen** Wegen, die sie berühren, und die
 Bau aller Auszüge in einem Stück**; keine Kante fehlt, keine steht doppelt, eine Route geht über die Grenze, als gäbe es
 sie nicht. Das hängt weder davon ab, wie weit ein Auszug über die Grenze reicht, noch wie die Umrisse genau verlaufen
 (sie verteilen nur die Kacheln); auch eine Fähre, deren einziges Stück eine fremde Kachel ohne Knoten darin kreuzt,
-kommt hinein. Geprüft: `cargo test` (`tests/regionen.rs`), dazu ganz DACH und `alsace` (als Frankreich) entlang der
-ganzen Grenze im Elsass, 594 Kacheln gleich, und die Testkacheln Kehl/Straßburg von gpxart.com. Damit das gilt, liegt
+kommt hinein. Geprüft: `cargo test` (`tests/regionen.rs`); die Testkacheln Kehl/Straßburg von gpxart.com
+(`freiburg-regbez` und `alsace`, beide vom 28.10.2026); ganz DACH und `alsace` (als Frankreich) entlang der ganzen
+Grenze im Elsass, 530 Kacheln gleich bis auf drei, in denen sich Wege zwischen den Datenständen der beiden Auszüge
+(18. und 28.10.) geändert hatten (in einem Stück gewinnt der zuerst gelesene Auszug; liest man ihn andersherum,
+stimmen die drei, und zwei andere weichen ab). Der Lauf nimmt darum Auszüge desselben Tages. Damit das gilt, liegt
 jede Kante in der Kachel ihrer Kette, auch wenn sie nach Douglas-Peucker genau auf der Kachelgrenze liegt (seit
 gpxart.com #85; vorher hing so eine Kante in seltenen Fällen von Wegen der Nachbarkachel ab).
 
-Die Randwege sind klein: `dach` gibt `france` RANDDACH, `france` gibt `dach` RANDFRANCE (Grenze am Rhein, im Jura
-und am Genfersee). Speicher und Platte je Job hängen nur von der eigenen Region ab.
+Die Randwege sind klein: `dach` gibt `france` 5,7 MB, `france` gibt `dach` 15,1 MB (Grenze am Rhein, im Jura und am
+Genfersee), Monaco und Andorra geben Frankreich je ½ MB. Speicher und Platte je Job hängen nur von der eigenen Region
+ab; der Schritt Randwege kostet je Region ein zweites Lesen ihres Auszugs (DACH gut 5 min).
 
 Monaco und Andorra sind eigene Auszüge, nicht Teil von `france`: Monaco liegt zwar im Umriss von Frankreich, Andorra
-aber nur mit seinem Rand. Beide sind eigene Regionen; ihre Kacheln gehören meist Frankreich bzw. Andorra.
+nur mit seinem Rand. Beide sind eigene Regionen (wenige Sekunden). Monacos Kacheln gehören Frankreich, weil `france`
+vor `monaco` steht; Monaco gibt seine Wege als Randwege dazu, sein Archiv ist leer.
 
 ## Vierteljährlicher Lauf und Releases
 
