@@ -12,8 +12,9 @@ Repo von gpxart.com.
   West nach Ost, `y` von Nord nach Süd). Eine Kachel ist in DACH etwa 6–7 km breit.
 - Je Kachel gibt es eine Datei `12/<x>/<y>.bin` unterhalb des Graph-Ordners (bzw. der Graph-Version in der URL).
 - Der Builder schreibt nur Kacheln mit Wegen. Fehlt eine Datei, gibt es dort keine Wege: Die Kachel ist leer oder
-  liegt außerhalb des gebauten Bereichs; für den Router ist das dasselbe. (So bleibt ganz DACH unter der Grenze von
-  20.000 Dateien, siehe [Größen](#größen-gemessen-version-2).) Eine Kachel mit `n = m = 0` bleibt gültig.
+  liegt außerhalb des gebauten Bereichs; für den Router ist das dasselbe. Eine Kachel mit `n = m = 0` bleibt gültig.
+- Gebaut wird in Regionen (je ein Geofabrik-Auszug, siehe README des Builders). Für den Router ändert das nichts: Jede
+  Kachel ist dieselbe wie bei einem Bau aller Regionen in einem Stück, auch an den Grenzen der Regionen.
 - Version 2 enthält einen gemeinsamen Graphen für die Fortbewegungsarten **Zu Fuß, Rennrad, Gravel/MTB und Auto**:
   Knoten, Kanten, Kantenlängen und je Fortbewegungsart die **Stellen** (gpxart.com #11), also für jede Kante und
   Richtung die Stufe (frei, Hinweis, gemieden, gesperrt) und die Arten der Hinweise. Eine Kante, die für alle vier
@@ -194,7 +195,8 @@ Auto, Gesamthinweis „Ohne Wege“), stehen nicht im Graphen.
   GPX die Form der Wege (gpxart.com #12: keine Ausdünnung, die man sieht). Wegstücke über 5 km teilt der Builder,
   damit jede Länge in `u16` passt.
 - **Kanten:** Die Geometrie einer Kante ist die gerade Linie zwischen ihren Knoten; sie weicht höchstens 2 m vom
-  OSM-Weg ab. Ihre **Länge** ist die echte Länge entlang des OSM-Weges (Großkreis, Erdradius 6 371 008,8 m). Sie ist
+  OSM-Weg ab. Sie steht in der Kachel, in der ihr Stück des OSM-Weges liegt; liegt sie genau auf einer Kachelgrenze,
+  kann das jede der beiden Kacheln sein. Ihre **Länge** ist die echte Länge entlang des OSM-Weges (Großkreis, Erdradius 6 371 008,8 m). Sie ist
   nie kürzer als die Luftlinie zwischen den Knoten, bis auf Rundung (höchstens ≈ 0,3 m).
   Verbinden mehrere Kanten dieselben zwei Knoten und haben sie in allen vier Stellen-Abschnitten dieselbe Klasse, bleibt
   nur die kürzeste. Kanten mit verschiedenen Stellen bleiben nebeneinander stehen (Mehrfachkanten).

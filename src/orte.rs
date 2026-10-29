@@ -278,7 +278,8 @@ impl Orte {
 
     /// Fläche innerhalb der Grenze, oder warum es keine gibt. Fehlen einzelne Wege (der DACH-Auszug schneidet etwa die
     /// Grenze im Genfersee ab), schließen gerade Linien zwischen den offenen Enden die Ringe, solange höchstens
-    /// `MAX_ANTEIL_FEHLT` der Wege fehlen und die Linien zusammen höchstens `MAX_LUECKEN_KM` lang sind.
+    /// `MAX_ANTEIL_FEHLT` der Wege fehlen und die Linien zusammen höchstens `MAX_LUECKEN_KM` lang sind. Fehlen nur ganze
+    /// Ringe (Überseegebiete), zählen die vorhandenen.
     fn flaeche(&self, grenze: &Grenze) -> Result<(Flaeche, f64), String> {
         let mut kanten = Vec::new();
         let mut enden: HashMap<i64, u32> = HashMap::new();
