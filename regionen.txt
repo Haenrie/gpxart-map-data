@@ -9,6 +9,17 @@
 # Die Reihenfolge zählt: Wo sich die Umrisse an einer Grenze überlappen, gehört eine Kachel der ersten Region. Die
 # Kacheln selbst hängen davon nicht ab (README, „Regionen“).
 
-dach     europe/dach                                   DE AT CH LI
-# Monaco und Andorra fehlen im Auszug von Frankreich (Monaco liegt im Umriss, Andorra nur am Rand).
-france   europe/france,europe/monaco,europe/andorra    FR MC AD
+# Probelauf ganz Europa ohne Russland (gpxart.com #85, ADR 0003): Vorschlag für die Gruppen, kein Release
+dach            europe/dach                                                         DE AT CH LI
+france          europe/france,europe/monaco,europe/andorra                          FR MC AD
+italia          europe/italy,europe/malta                                           IT SM VA MT
+iberia          europe/spain,europe/portugal,europe/azores                          ES PT GI
+britain         europe/britain-and-ireland,europe/isle-of-man,europe/guernsey-jersey GB IE IM GG JE
+benelux         europe/netherlands,europe/belgium,europe/luxembourg                 NL BE LU
+polska          europe/poland                                                       PL
+norden          europe/norway,europe/sweden,europe/denmark,europe/finland,europe/iceland,europe/faroe-islands NO SE DK FI IS FO
+baltikum        europe/estonia,europe/latvia,europe/lithuania                       EE LV LT
+mitte           europe/czech-republic,europe/slovakia,europe/hungary,europe/slovenia CZ SK HU SI
+suedosten       europe/croatia,europe/bosnia-herzegovina,europe/serbia,europe/montenegro,europe/kosovo,europe/albania,europe/macedonia,europe/greece,europe/bulgaria,europe/romania,europe/moldova HR BA RS ME XK AL MK GR BG RO MD
+osten           europe/ukraine,europe/belarus                                       UA BY
+tuerkei         europe/turkey,europe/georgia,europe/cyprus                          TR GE CY
