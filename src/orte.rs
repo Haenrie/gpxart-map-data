@@ -25,8 +25,13 @@ const ARTEN: [(&str, u32); 6] = [
 const STADT: usize = 2;
 /// Namen in diesen Sprachen kommen dazu, wenn sie vom Namen abweichen (München, Munich).
 const SPRACHEN: [&str; 2] = ["de", "en"];
-/// So viele Anfangsbuchstaben eines Wortes bestimmen den Teil des Verzeichnisses.
+/// So viele Anfangsbuchstaben eines Wortes bestimmen den Teil des Verzeichnisses, …
 const SCHLUESSEL: usize = 2;
+/// … bis ein Teil größer als so viele Bytes wird: Dann wird er nach dem nächsten Buchstaben des Namens weiter geteilt
+/// (gpxart.com #90; französische Namen beginnen oft mit Le, La, Les), …
+const TEIL_MAX: usize = 300_000;
+/// … höchstens bis zu so vielen Buchstaben.
+const SCHLUESSEL_MAX: usize = 6;
 /// Wörter ab dem zweiten zählen erst ab dieser Länge („Landsberg am Lech“ steht unter „la“ und „le“, nicht „am“).
 const WORT_MIN: usize = 3;
 /// So lang dürfen die Lücken in einer Grenze zusammen sein, die gerade Linien schließen (km), …
@@ -428,10 +433,14 @@ fn verzeichnis_aus(orte: &[OrtImLand], bereiche: &[TileRange]) -> Ortsverzeichni
         .map(|(nummer, land)| (land, nummer))
         .collect();
 
-    // Jeder Ort steht in den Teilen der Anfangsbuchstaben seiner Wörter, in jedem Teil einmal; größte zuerst.
+    // Jeder Ort steht in den Teilen der Anfangsbuchstaben seiner Wörter, in jedem Teil einmal; größte zuerst. Zu jedem
+    // Wort zählt der Rest des Namens ab diesem Wort ohne Zwischenraum („Le Mans“: „lemans“), nach dem ein zu großer
+    // Teil weiter geteilt wird.
     let mut zeilen: HashMap<i64, String> = HashMap::new();
-    let mut teile: BTreeMap<String, Vec<(u32, &str, i64)>> = BTreeMap::new();
+    let mut anfaenge: BTreeMap<String, Vec<(i64, String)>> = BTreeMap::new();
+    let mut nach_id: HashMap<i64, &Ort> = HashMap::new();
     for &(id, ort, land) in &orte {
+        nach_id.insert(*id, ort);
         let bei = (ort.art >= STADT)
             .then(|| naechstgroessere_stadt(*id, ort, &staedte))
             .flatten();
@@ -440,25 +449,35 @@ fn verzeichnis_aus(orte: &[OrtImLand], bereiche: &[TileRange]) -> Ortsverzeichni
             *id,
             eintrag_json(ort, land, bei.map_or("", |s| s.name.as_str())),
         );
-        let mut schluessel = BTreeSet::new();
+        let mut reste = BTreeSet::new();
         for name in std::iter::once(&ort.name).chain(ort.namen.iter().map(|(_, n)| n)) {
-            for (i, wort) in woerter(name).iter().enumerate() {
+            let woerter = woerter(name);
+            for (i, wort) in woerter.iter().enumerate() {
                 if i == 0 || wort.len() >= WORT_MIN {
-                    schluessel.insert(wort[..wort.len().min(SCHLUESSEL)].to_string());
+                    let rest = woerter[i..].concat();
+                    reste.insert((
+                        wort[..wort.len().min(SCHLUESSEL)].to_string(),
+                        rest[..rest.len().min(SCHLUESSEL_MAX)].to_string(),
+                    ));
                 }
             }
         }
-        for s in schluessel {
-            teile
-                .entry(s)
-                .or_default()
-                .push((ort.groesse, &ort.name, *id));
+        for (s, rest) in reste {
+            anfaenge.entry(s).or_default().push((*id, rest));
         }
     }
+    let (teile, geteilt) = teilen(anfaenge, |id| zeilen[&id].len() + 2);
     let mut dateien = BTreeMap::new();
-    for (schluessel, eintraege) in &mut teile {
-        eintraege.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)).then(a.2.cmp(&b.2)));
-        let zeilen: Vec<&str> = eintraege.iter().map(|e| zeilen[&e.2].as_str()).collect();
+    for (schluessel, ids) in &teile {
+        let mut ids = ids.clone();
+        ids.sort_by(|a, b| {
+            let (x, y) = (nach_id[a], nach_id[b]);
+            y.groesse
+                .cmp(&x.groesse)
+                .then(x.name.cmp(&y.name))
+                .then(a.cmp(b))
+        });
+        let zeilen: Vec<&str> = ids.iter().map(|id| zeilen[id].as_str()).collect();
         dateien.insert(
             format!("{schluessel}.json"),
             format!("[\n{}\n]\n", zeilen.join(",\n")),
@@ -466,8 +485,13 @@ fn verzeichnis_aus(orte: &[OrtImLand], bereiche: &[TileRange]) -> Ortsverzeichni
     }
 
     let anzahl = orte.len();
-    let mut index = format!("{{\"format\":1,\"orte\":{anzahl},\"teile\":[");
+    let mut index = format!("{{\"format\":2,\"orte\":{anzahl},\"teile\":[");
     for (i, s) in teile.keys().enumerate() {
+        index.push_str(if i == 0 { "" } else { "," });
+        json_string(&mut index, s);
+    }
+    index.push_str("],\"geteilt\":[");
+    for (i, s) in geteilt.iter().enumerate() {
         index.push_str(if i == 0 { "" } else { "," });
         json_string(&mut index, s);
     }
@@ -489,6 +513,52 @@ fn verzeichnis_aus(orte: &[OrtImLand], bereiche: &[TileRange]) -> Ortsverzeichni
         laender: laender.len(),
         meldungen: Vec::new(),
     }
+}
+
+/// Teilt zu große Teile weiter: Ein Teil über `TEIL_MAX` Bytes (`bytes` je Ort) mit mindestens `SCHLUESSEL`
+/// Buchstaben wird nach dem nächsten Buchstaben des Rests geteilt („le“ → „lem“ für „Le Mans“), bis
+/// `SCHLUESSEL_MAX`. Orte, deren Rest nicht länger ist als der Schlüssel, bleiben im geteilten Teil. Gibt die Teile
+/// (Schlüssel → Orte, je einmal) und die geteilten Schlüssel zurück.
+fn teilen(
+    mut offen: BTreeMap<String, Vec<(i64, String)>>,
+    bytes: impl Fn(i64) -> usize,
+) -> (BTreeMap<String, Vec<i64>>, Vec<String>) {
+    let ids = |eintraege: &[(i64, String)]| {
+        let mut ids: Vec<i64> = eintraege.iter().map(|e| e.0).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    };
+    let mut teile = BTreeMap::new();
+    let mut geteilt = Vec::new();
+    // Die Teile eines geteilten Schlüssels sind länger, also nach ihm sortiert: Sie kommen später dran.
+    while let Some((schluessel, eintraege)) = offen.pop_first() {
+        let n = schluessel.len();
+        let alle = ids(&eintraege);
+        if n < SCHLUESSEL
+            || n >= SCHLUESSEL_MAX
+            || alle.iter().map(|&id| bytes(id)).sum::<usize>() <= TEIL_MAX
+        {
+            teile.insert(schluessel, alle);
+            continue;
+        }
+        let mut bleiben = Vec::new();
+        for (id, rest) in eintraege {
+            if rest.len() > n {
+                offen
+                    .entry(rest[..=n].to_string())
+                    .or_default()
+                    .push((id, rest));
+            } else {
+                bleiben.push((id, rest));
+            }
+        }
+        if !bleiben.is_empty() {
+            teile.insert(schluessel.clone(), ids(&bleiben));
+        }
+        geteilt.push(schluessel);
+    }
+    (teile, geteilt)
 }
 
 fn fund_ort<'a>(
