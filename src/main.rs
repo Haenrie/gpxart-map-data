@@ -13,9 +13,10 @@ use wegegraph::{
 const USAGE: &str = "\
 Aufruf: wegegraph <ausgabe-ordner> [<x0>-<x1> <y0>-<y1>] <eingabe.osm.pbf>...
         wegegraph orte <ausgabe-ordner> [<x0>-<x1> <y0>-<y1>]... <eingabe.osm.pbf>...
-        wegegraph randwege <regionen.txt> <umrisse> <region> <ausgabe-ordner> <eingabe.osm.pbf>
-        wegegraph region <regionen.txt> <umrisse> <region> <ausgabe-ordner> <eingabe.osm.pbf> [<randwege>...]
-        wegegraph ortsliste <regionen.txt> <region> <ausgabe.tsv> <eingabe.osm.pbf>
+        wegegraph regionen <regionen.txt> <umrisse>
+        wegegraph randwege <regionen.txt> <umrisse> <region> <ausgabe-ordner> <eingabe.osm.pbf>...
+        wegegraph region <regionen.txt> <umrisse> <region> <ausgabe-ordner> <eingabe.osm.pbf>... [<randwege.rand>...]
+        wegegraph ortsliste <regionen.txt> <region> <ausgabe.tsv> <eingabe.osm.pbf>...
         wegegraph ortsverzeichnis <ausgabe-ordner> <ortsliste.tsv>...
 
 In einem Stück: Baut den Wegegraphen (Format 2, alle Fortbewegungsarten) für alle z12-Kacheln x0..=x1, y0..=y1,
@@ -24,17 +25,18 @@ entfallen. Mit „orte“ entsteht stattdessen das Ortsverzeichnis (Format 1) al
 <ausgabe-ordner>/<teil>.json, mit Bereichen nur für die Orte in diesen Kacheln. Mehrere Eingabedateien werden
 zusammengeführt.
 
-Je Region (Liste regionen.txt, Umrisse <umrisse>/<name>.poly): „randwege“ schreibt aus dem Auszug der Region für jede
-andere Region die Wege, die eine ihrer Kacheln berühren, als <ausgabe-ordner>/<region>-<andere>.rand. „region“ baut
-die Kacheln der Region aus ihrem Auszug und den Randwegen der anderen für sie, genau so, als wären alle Auszüge in
-einem Stück gebaut. „ortsliste“ schreibt die Orte der Region mit ihrem Land, „ortsverzeichnis“ baut aus den Listen
-aller Regionen das Ortsverzeichnis.
+Je Region (Liste regionen.txt, Umrisse <umrisse>/<Auszug>.poly): „regionen“ prüft die Liste und die Umrisse.
+„randwege“ schreibt aus den Auszügen der Region für jede andere Region die Wege, die eine ihrer Kacheln berühren, als
+<ausgabe-ordner>/<region>-<andere>.rand. „region“ baut die Kacheln der Region aus ihren Auszügen und den Randwegen der
+anderen für sie (Dateien auf .rand), genau so, als wären alle Auszüge in einem Stück gebaut. „ortsliste“ schreibt die
+Orte der Region mit ihrem Land, „ortsverzeichnis“ baut aus den Listen aller Regionen das Ortsverzeichnis.
 
 Beispiele: wegegraph graph/test 2169-2173 1421-1424 oberbayern.osm.pbf schwaben.osm.pbf
            wegegraph orte orte/test 2169-2173 1421-1424 oberbayern.osm.pbf schwaben.osm.pbf
+           wegegraph regionen regionen.txt umrisse
            wegegraph randwege regionen.txt umrisse dach rand dach.osm.pbf
            wegegraph region regionen.txt umrisse dach graph/2026-10-18 dach.osm.pbf rand/france-dach.rand
-           wegegraph ortsliste regionen.txt dach orte-dach.tsv dach.osm.pbf
+           wegegraph ortsliste regionen.txt france orte-france.tsv france.osm.pbf monaco.osm.pbf andorra.osm.pbf
            wegegraph ortsverzeichnis orte/2026-10-18/orte orte-dach.tsv orte-france.tsv";
 
 /// Kachelzeilen je Streifen: Ein Streifen von ganz DACH braucht beim Bau gut 1 GB Speicher.
@@ -61,6 +63,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let ergebnis = match args.split_first() {
         Some((befehl, rest)) if befehl == "orte" => run_orte(rest),
+        Some((befehl, rest)) if befehl == "regionen" => run_regionen(rest),
         Some((befehl, rest)) if befehl == "randwege" => run_randwege(rest),
         Some((befehl, rest)) if befehl == "region" => run_region(rest),
         Some((befehl, rest)) if befehl == "ortsliste" => run_ortsliste(rest),
@@ -118,21 +121,48 @@ fn run_orte(args: &[String]) -> Ergebnis {
     schreibe_verzeichnis(&out, &orte.verzeichnis(&ranges), t0)
 }
 
-fn run_ortsliste(args: &[String]) -> Ergebnis {
-    let [liste, name, out, input] = args else {
+fn run_regionen(args: &[String]) -> Ergebnis {
+    let [liste, umrisse] = args else {
         return Err(Aufruf.into());
     };
+    let regionen = Regionen::lies(Path::new(liste), Path::new(umrisse))?;
+    for (i, r) in regionen.alle().iter().enumerate() {
+        let (anteil, andere) = regionen.ueberlappung(i);
+        println!(
+            "{:<16} {:<3} % in anderen ({}); {}; {}",
+            r.name,
+            (100.0 * anteil).round(),
+            andere.join(", "),
+            r.auszuege.join(","),
+            r.staaten.join(" ")
+        );
+    }
+    println!(
+        "{} Regionen mit {} Auszügen, Umrisse überlappen sich nur am Rand",
+        regionen.alle().len(),
+        regionen
+            .alle()
+            .iter()
+            .map(|r| r.auszuege.len())
+            .sum::<usize>()
+    );
+    Ok(())
+}
+
+fn run_ortsliste(args: &[String]) -> Ergebnis {
+    let [liste, name, out, inputs @ ..] = args else {
+        return Err(Aufruf.into());
+    };
+    if inputs.is_empty() {
+        return Err(Aufruf.into());
+    }
     let t0 = Instant::now();
     let regionen = Regionen::lies_liste(Path::new(liste))?;
     let region = regionen
         .iter()
         .find(|r| &r.name == name)
         .ok_or_else(|| format!("Region {name} steht nicht in {liste}"))?;
-    let orte = orte_lesen(
-        Orte::fuer_staaten(&region.staaten),
-        std::slice::from_ref(input),
-        t0,
-    )?;
+    let orte = orte_lesen(Orte::fuer_staaten(&region.staaten), inputs, t0)?;
     let (text, anzahl, meldungen) = orte.ortsliste();
     for meldung in &meldungen {
         println!("{meldung}");
@@ -208,11 +238,14 @@ fn run(args: &[String]) -> Ergebnis {
 }
 
 fn run_randwege(args: &[String]) -> Ergebnis {
-    let (regionen, eigene, [out, input]) = region(args)? else {
+    let (regionen, eigene, [out, inputs @ ..]) = region(args)? else {
         return Err(Aufruf.into());
     };
+    if inputs.is_empty() {
+        return Err(Aufruf.into());
+    }
     let t0 = Instant::now();
-    let osm = lesen(std::slice::from_ref(input), &[], t0)?;
+    let osm = lesen(inputs, &[], t0)?;
     let dateien = osm.randwege(&regionen, eigene);
     let out = Path::new(out);
     fs::create_dir_all(out)?;
@@ -232,11 +265,17 @@ fn run_randwege(args: &[String]) -> Ergebnis {
 }
 
 fn run_region(args: &[String]) -> Ergebnis {
-    let (regionen, eigene, [out, input, randwege @ ..]) = region(args)? else {
+    let (regionen, eigene, [out, dateien @ ..]) = region(args)? else {
         return Err(Aufruf.into());
     };
+    // Auszüge zuerst, dann die Randwege (.rand)
+    let n = dateien.partition_point(|d| !d.ends_with(".rand"));
+    let (inputs, randwege) = dateien.split_at(n);
+    if inputs.is_empty() || randwege.iter().any(|d| !d.ends_with(".rand")) {
+        return Err(Aufruf.into());
+    }
     let t0 = Instant::now();
-    let osm = lesen(std::slice::from_ref(input), randwege, t0)?;
+    let osm = lesen(inputs, randwege, t0)?;
     bauen(&osm, Path::new(out), None, Some((&regionen, eigene)), t0)
 }
 

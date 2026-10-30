@@ -1,12 +1,14 @@
-# Regionen des Wegegraphen (gpxart.com #85). Jede Zeile ist eine Region: Name (für Dateien und Release), Auszug bei
-# Geofabrik (https://download.geofabrik.de/<Auszug>-latest.osm.pbf, Umriss <Auszug>.poly) und die Staaten
-# (ISO 3166-1), deren Orte die Region ins Ortsverzeichnis bringt. Für eine weitere Region genügt eine Zeile.
+# Regionen des Wegegraphen (gpxart.com #85, ADR 0003). Jede Zeile ist eine Region: Name (für Dateien und Release),
+# Auszüge bei Geofabrik, mit Komma getrennt (https://download.geofabrik.de/<Auszug>-latest.osm.pbf, Umriss
+# <Auszug>.poly), und die Staaten (ISO 3166-1), deren Orte die Region ins Ortsverzeichnis bringt. Für eine weitere
+# Region genügt eine Zeile.
+#
+# Eine Region ist ein Land, ein Sammelauszug wie dach oder kleine Nachbarländer zusammen, höchstens ≈ 10 GB Auszug.
+# Regionen überlappen sich nur am Rand; steckt eine zu mehr als der Hälfte in anderen, bricht der Lauf ab.
 #
 # Die Reihenfolge zählt: Wo sich die Umrisse an einer Grenze überlappen, gehört eine Kachel der ersten Region. Die
 # Kacheln selbst hängen davon nicht ab (README, „Regionen“).
 
-dach     europe/dach     DE AT CH LI
-france   europe/france   FR
+dach     europe/dach                                   DE AT CH LI
 # Monaco und Andorra fehlen im Auszug von Frankreich (Monaco liegt im Umriss, Andorra nur am Rand).
-monaco   europe/monaco   MC
-andorra  europe/andorra  AD
+france   europe/france,europe/monaco,europe/andorra    FR MC AD

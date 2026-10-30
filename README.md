@@ -51,14 +51,15 @@ target/release/wegegraph orte orte/2026-10-18/orte dach-latest.osm.pbf
 # nur die Orte in einem oder mehreren Rechtecken aus z12-Kacheln (Testdaten)
 target/release/wegegraph orte orte/test 2169-2173 1421-1424 2200-2201 1342-1343 oberbayern.osm.pbf berlin.osm.pbf
 
-# je Region (wie der vierteljährliche Lauf, siehe „Regionen“); Umrisse von Geofabrik nach umrisse/<Name>.poly
-curl -o umrisse/dach.poly https://download.geofabrik.de/europe/dach.poly    # ebenso france, monaco, andorra
-target/release/wegegraph randwege regionen.txt umrisse dach rand dach.osm.pbf        # schreibt rand/dach-france.rand …
-target/release/wegegraph randwege regionen.txt umrisse france rand france.osm.pbf
+# je Region (wie der vierteljährliche Lauf, siehe „Regionen“); Umrisse von Geofabrik nach umrisse/<Auszug>.poly
+curl --create-dirs -o umrisse/europe/dach.poly https://download.geofabrik.de/europe/dach.poly  # ebenso france, monaco, andorra
+target/release/wegegraph regionen regionen.txt umrisse                               # prüft Liste und Umrisse
+target/release/wegegraph randwege regionen.txt umrisse dach rand dach.osm.pbf        # schreibt rand/dach-france.rand
+target/release/wegegraph randwege regionen.txt umrisse france rand france.osm.pbf monaco.osm.pbf andorra.osm.pbf
 target/release/wegegraph region regionen.txt umrisse dach graph/2026-10-18 dach.osm.pbf rand/*-dach.rand
-target/release/wegegraph region regionen.txt umrisse france graph/2026-10-18 france.osm.pbf rand/*-france.rand
+target/release/wegegraph region regionen.txt umrisse france graph/2026-10-18 france.osm.pbf monaco.osm.pbf andorra.osm.pbf rand/*-france.rand
 target/release/wegegraph ortsliste regionen.txt dach orte-dach.tsv dach.osm.pbf
-target/release/wegegraph ortsliste regionen.txt france orte-france.tsv france.osm.pbf
+target/release/wegegraph ortsliste regionen.txt france orte-france.tsv france.osm.pbf monaco.osm.pbf andorra.osm.pbf
 target/release/wegegraph ortsverzeichnis orte/2026-10-18/orte orte-dach.tsv orte-france.tsv
 ```
 
@@ -77,18 +78,27 @@ einem Stück, und die Welt in Regionen (nächster Abschnitt).
 
 Ein Rechner hat zu wenig Speicher und Platte für Europa oder die Welt in einem Stück (der Builder hält einen Auszug
 ganz im Speicher, für DACH 6,4 GiB; der öffentliche Runner hat 16 GB RAM und ≈ 14 GB Platte, freiräumbar auf ≈ 31 GB).
-Darum baut jeder Lauf **jede Region für sich** aus ihrem eigenen Geofabrik-Auszug, als eigener Job.
-[`regionen.txt`](regionen.txt) listet sie:
+Darum baut jeder Lauf **jede Region für sich** aus ihren eigenen Geofabrik-Auszügen, als eigener Job
+(gpxart.com ADR 0003). [`regionen.txt`](regionen.txt) listet sie:
 
 ```
-dach     europe/dach     DE AT CH LI
-france   europe/france   FR
+dach     europe/dach                                   DE AT CH LI
+france   europe/france,europe/monaco,europe/andorra    FR MC AD
 ```
 
-Je Zeile Name (für Dateien und Release), Pfad des Auszugs bei Geofabrik und die Staaten (ISO 3166-1), deren Orte die
-Region ins Ortsverzeichnis bringt. **Für eine weitere Region genügt eine Zeile**; Umriss und Auszug holt der Lauf selbst.
-Eine Region sollte so groß sein, dass ihr Auszug in den Speicher passt (bis etwa 10 GB PBF, z. B. ein Land oder bei
-großen Ländern die Teilauszüge, die Geofabrik anbietet).
+Je Zeile Name (für Dateien und Release), die Pfade der Auszüge bei Geofabrik (mit Komma getrennt) und die Staaten
+(ISO 3166-1), deren Orte die Region ins Ortsverzeichnis bringt. **Für eine weitere Region genügt eine Zeile**; Umrisse
+und Auszüge holt der Lauf selbst. Eine Region ist ein Land, ein Sammelauszug von Geofabrik (`dach`) oder eine Gruppe
+kleiner Nachbarländer (z. B. das Baltikum), so groß, dass ihre Auszüge zusammen in den Speicher passen (bis etwa
+10 GB PBF; große Länder in den Teilauszügen, die Geofabrik anbietet). Kleine Nachbarn zusammen sparen Jobs und
+Randwege. Der Umriss einer Region ist die Vereinigung der Umrisse ihrer Auszüge.
+
+Regionen überlappen sich **nur am Rand**. `wegegraph regionen` (im Lauf vor allem anderen) bricht ab, wenn eine Region
+zu mehr als der Hälfte in anderen liegt: Ihre Wege würden doppelt gelesen. Das wäre nicht falsch (doppelte Wege zählen
+einmal), aber doppelte Arbeit. Gemessen an allen Ländern Europas (Oktober 2026): Länder höchstens 7 %, Kleinstaaten
+14–26 % (Andorra, Liechtenstein, Guernsey und Jersey); über der Grenze Isle of Man 62 %, Azoren 97 % (im Umriss von
+Portugal), Monaco 100 % (im Umriss von Frankreich) und `alps` neben `dach` 100 %. Solche Auszüge gehören in die Zeile
+ihres Nachbarn.
 
 **Wie Geofabrik an Grenzen schneidet** (geprüft an `alsace`, `freiburg-regbez`, `dach` und `france`, Oktober 2026): Ein
 Auszug enthält jeden Weg, der mindestens einen Knoten im Umriss (`<Auszug>.poly`) hat, mit allen Knoten (kein Weg hat
@@ -101,10 +111,10 @@ enthält also kein Auszug alle Wege einer Kachel.
 enthält, sonst (Meer, Fährlinien) der mit dem nächsten Umriss. Nur sie baut die Kachel. Der Lauf hat zwei Schritte je
 Region:
 
-1. **Randwege** (`wegegraph randwege`): Die Region schreibt für jede andere Region die Wege ihres Auszugs, die eine
+1. **Randwege** (`wegegraph randwege`): Die Region schreibt für jede andere Region die Wege ihrer Auszüge, die eine
    Kachel der anderen berühren, mit Stellen und allen Knoten (`<von>-<an>.rand`, Format in `src/randwege.rs`, nur
    innerhalb eines Laufs). Dazu die Ortsliste.
-2. **Kacheln** (`wegegraph region`): Die Region liest ihren Auszug und die Randwege der anderen für sie und baut ihre
+2. **Kacheln** (`wegegraph region`): Die Region liest ihre Auszüge und die Randwege der anderen für sie und baut ihre
    Kacheln. Was doppelt vorkommt (ein Weg über die Grenze steht in beiden Auszügen), zählt einmal.
 
 So baut jede Region ihre Kacheln aus **allen** Wegen, die sie berühren, und die Kacheln sind **byte-gleich mit einem
@@ -124,8 +134,14 @@ Genfersee), Monaco und Andorra geben Frankreich je ½ MB. Speicher und Platte je
 ab; der Schritt Randwege kostet je Region ein zweites Lesen ihres Auszugs (DACH gut 5 min).
 
 Monaco und Andorra sind eigene Auszüge, nicht Teil von `france`: Monaco liegt zwar im Umriss von Frankreich, Andorra
-nur mit seinem Rand. Beide sind eigene Regionen (wenige Sekunden). Monacos Kacheln gehören Frankreich, weil `france`
-vor `monaco` steht; Monaco gibt seine Wege als Randwege dazu, sein Archiv ist leer.
+nur mit seinem Rand. Beide stehen in der Zeile von `france` (bis gpxart.com #85 waren sie eigene Regionen; Monaco
+besaß keine Kachel und gab nur Randwege).
+
+Ein **Release ist immer ganz**: alle Regionen der Liste, Auszüge desselben Tages, eine Version. Kommt eine Region dazu,
+ändern sich auch die Grenzkacheln ihrer Nachbarn, die dann mit demselben Datenstand neu gebaut werden müssen. Ein
+Release nur für die neue Region gibt es darum nicht. Wo die Abdeckung endet und keine Nachbarregion existiert,
+fehlen einer Randkachel die Wege jenseits der Grenze; sie wird trotzdem veröffentlicht (Fähren laufen durch Kacheln
+außerhalb aller Umrisse) und ist vollständig, sobald der Nachbar dazukommt.
 
 ## Vierteljährlicher Lauf und Releases
 
@@ -134,9 +150,9 @@ Actions → „Wegegraph bauen“ → „Run workflow“ von Hand starten. Jobs:
 
 | Job | je | macht |
 |---|---|---|
-| `plan` | Lauf | Version, Datei je Auszug, Umrisse, `cargo test`, Builder; legt das Release als Entwurf an |
-| `randwege` | Region | lädt den Auszug von Geofabrik (mit Prüfsumme), schreibt Randwege und Ortsliste |
-| `kacheln` | Region | baut die Kacheln aus Auszug und Randwegen der Nachbarn, prüft je Kachel 25 MiB, packt sie (je Archiv 2 GiB) und lädt das Archiv ins Release |
+| `plan` | Lauf | Version, Datei je Auszug, Umrisse, `cargo test`, Builder, prüft die Regionen; legt das Release als Entwurf an |
+| `randwege` | Region | lädt die Auszüge von Geofabrik (mit Prüfsumme), schreibt Randwege und Ortsliste |
+| `kacheln` | Region | baut die Kacheln aus Auszügen und Randwegen der Nachbarn, prüft je Kachel 25 MiB, packt sie (je Archiv 2 GiB) und lädt das Archiv ins Release |
 | `veroeffentlichen` | Lauf | Ortsverzeichnis aus allen Ortslisten, Zeiger, `wegegraph.json`, Prüfsummen; macht das Release sichtbar und löscht ältere |
 
 Alle Regionen nehmen die Auszüge desselben Tages: das älteste Datum der neuesten Auszüge (Geofabrik aktualisiert sie

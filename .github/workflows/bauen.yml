@@ -1,13 +1,13 @@
-# Baut den Wegegraphen und das Ortsverzeichnis für alle Regionen aus regionen.txt (je ein Geofabrik-Auszug) und
-# veröffentlicht sie als ein Release.
+# Baut den Wegegraphen und das Ortsverzeichnis für alle Regionen aus regionen.txt (je ein oder mehrere
+# Geofabrik-Auszüge) und veröffentlicht sie als ein Release.
 #
 #   Vierteljährlich   am 1. Januar, April, Juli und Oktober um 02:17 UTC
 #   Von Hand    „Run workflow“, auf Wunsch als Probelauf
 #   Probelauf   Push auf einen Branch probelauf/…: baut und misst alles, legt aber kein Release an
 #
 # Ablauf (README, „Regionen“): „plan“ legt Version, Auszüge und Umrisse fest und baut den Builder. Dann je Region
-# „randwege“: Auszug laden, Randwege für die Nachbarn und Ortsliste schreiben. Danach je Region „kacheln“: die Kacheln
-# der Region aus ihrem Auszug und den Randwegen der Nachbarn bauen, prüfen (je Kachel 25 MiB), packen (je Archiv
+# „randwege“: Auszüge laden, Randwege für die Nachbarn und Ortsliste schreiben. Danach je Region „kacheln“: die Kacheln
+# der Region aus ihren Auszügen und den Randwegen der Nachbarn bauen, prüfen (je Kachel 25 MiB), packen (je Archiv
 # 2 GiB) und ins Release laden. Zuletzt „veroeffentlichen“: Ortsverzeichnis aus allen Ortslisten, Zeiger,
 # wegegraph.json und SHA256SUMS; das Release wird erst dann sichtbar.
 #
@@ -54,15 +54,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Je Region die Datei hinter <Auszug>-latest.osm.pbf, z. B. dach-261018.osm.pbf. Alle Regionen bekommen das
+      # Je Auszug die Datei hinter <Auszug>-latest.osm.pbf, z. B. dach-261018.osm.pbf. Alle Auszüge bekommen das
       # älteste Datum darunter (Geofabrik aktualisiert die Auszüge nacheinander und hält ältere Tage eine Woche vor),
-      # damit die Daten aller Regionen vom selben Tag sind.
+      # damit die Daten aller Regionen vom selben Tag sind. regionen.lst hat eine Zeile „Region Auszug“ je Auszug.
       - name: Version
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          grep -v '^\s*#' regionen.txt | awk 'NF { print $1, $2 }' > regionen.lst
+          sed 's/#.*//' regionen.txt | awk 'NF { n = split($2, a, ","); for (i = 1; i <= n; i++) print $1, a[i] }' > regionen.lst
           [ -s regionen.lst ] || { echo "::error::keine Regionen in regionen.txt"; exit 1; }
           datum=
           while read -r name auszug; do
@@ -79,7 +79,12 @@ jobs:
             [ -n "$groesse" ] || { echo "::error::$url fehlt" >&2; exit 1; }
             jq -cn --arg name "$name" --arg auszug "$auszug" --arg url "$url" --arg datei "$datei" \
               --argjson groesse "$groesse" '$ARGS.named'
-          done < regionen.lst | jq -cs .)
+          done < regionen.lst | jq -cs '
+            # je Region ein Eintrag mit ihren Auszügen und deren Größe zusammen, in der Reihenfolge der Liste
+            reduce .[] as $a ([];
+              if length > 0 and .[length - 1].name == $a.name
+              then .[length - 1].auszuege += [$a | del(.name)] | .[length - 1].groesse += $a.groesse
+              else . + [{name: $a.name, groesse: $a.groesse, auszuege: [$a | del(.name)]}] end)')
           datum="20${datum:0:2}-${datum:2:2}-${datum:4:2}"
           version="$datum-${GITHUB_SHA::7}"
           echo "Version $version"
@@ -103,16 +108,17 @@ jobs:
           fi
           echo "neu=$neu" >> "$GITHUB_OUTPUT"
 
-      # Umrisse der Regionen: Sie legen fest, welcher Region eine Kachel gehört; alle Läufe nehmen dieselben.
+      # Umrisse der Auszüge (umrisse/<Auszug>.poly): Sie legen fest, welcher Region eine Kachel gehört; alle Läufe
+      # nehmen dieselben.
       - name: Umrisse
         if: steps.version.outputs.neu == 'true'
         run: |
-          mkdir -p umrisse
           while read -r name auszug; do
-            curl -fsS --retry 3 -o "umrisse/$name.poly" "$GEOFABRIK/$auszug.poly"
+            mkdir -p "umrisse/$(dirname "$auszug")"
+            curl -fsS --retry 3 -o "umrisse/$auszug.poly" "$GEOFABRIK/$auszug.poly"
           done < regionen.lst
           cp regionen.txt umrisse/
-          ls -l umrisse
+          find umrisse -name '*.poly' | sort
 
       - name: Rust
         if: steps.version.outputs.neu == 'true'
@@ -133,6 +139,14 @@ jobs:
           cargo test --locked
           cargo build --release --locked
           cp target/release/wegegraph umrisse/
+
+      # Liste und Umrisse prüfen (Regionen überlappen sich nur am Rand), bevor die Regionen laden
+      - name: Regionen
+        if: steps.version.outputs.neu == 'true'
+        run: |
+          umrisse/wegegraph regionen regionen.txt umrisse > regionen.log
+          cat regionen.log
+          { echo '```'; cat regionen.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       # Leeres Release als Entwurf: Die Läufe der Regionen laden ihre Archive hinein, sichtbar wird es erst am Schluss.
       - name: Entwurf
@@ -176,20 +190,23 @@ jobs:
           name: builder
           path: builder
 
-      - name: Auszug laden
+      - name: Auszüge laden
         env:
-          URL: ${{ matrix.region.url }}
+          AUSZUEGE: ${{ toJSON(matrix.region.auszuege) }}
         run: |
           chmod +x builder/wegegraph
           [ -x /usr/bin/time ] || sudo apt-get install -y -qq time
-          pruefsumme=$(curl -fsS --retry 3 "$URL.md5" | cut -d' ' -f1)
-          curl -fsSL --retry 3 -o "$NAME.osm.pbf" "$URL"
-          echo "$pruefsumme  $NAME.osm.pbf" | md5sum -c -
-          ls -l "$NAME.osm.pbf"
+          mkdir -p auszug
+          jq -r '.[] | "\(.url) \(.datei)"' <<< "$AUSZUEGE" | while read -r url datei; do
+            pruefsumme=$(curl -fsS --retry 3 "$url.md5" | cut -d' ' -f1)
+            curl -fsSL --retry 3 -o "auszug/$datei" "$url"
+            echo "$pruefsumme  auszug/$datei" | md5sum -c -
+          done
+          ls -l auszug
 
       - name: Randwege
         run: |
-          /usr/bin/time -v -o zeit.txt builder/wegegraph randwege builder/regionen.txt builder "$NAME" rand "$NAME.osm.pbf"
+          /usr/bin/time -v -o zeit.txt builder/wegegraph randwege builder/regionen.txt builder "$NAME" rand auszug/*.osm.pbf
           grep -E 'Maximum resident|Elapsed' zeit.txt
           ls -l rand
 
@@ -199,7 +216,7 @@ jobs:
         run: |
           mkdir -p ortsliste
           /usr/bin/time -v -o zeit-orte.txt builder/wegegraph ortsliste builder/regionen.txt "$NAME" \
-            "ortsliste/$NAME.tsv" "$NAME.osm.pbf" | tee orte.log
+            "ortsliste/$NAME.tsv" auszug/*.osm.pbf | tee orte.log
           grep -E 'Maximum resident|Elapsed' zeit-orte.txt
           grep 'unvollständig' orte.log | while read -r zeile; do echo "::warning::$NAME: $zeile"; done
           mkdir -p messung
@@ -233,11 +250,11 @@ jobs:
           path: ortsliste/
           retention-days: 3
 
-      # Der Auszug geht an den Lauf „kacheln“ derselben Region, statt ihn bei Geofabrik ein zweites Mal zu laden.
+      # Die Auszüge gehen an den Lauf „kacheln“ derselben Region, statt sie bei Geofabrik ein zweites Mal zu laden.
       - uses: actions/upload-artifact@v7
         with:
           name: auszug-${{ matrix.region.name }}
-          path: ${{ matrix.region.name }}.osm.pbf
+          path: auszug/
           compression-level: 0
           retention-days: 1
 
@@ -252,6 +269,7 @@ jobs:
         region: ${{ fromJSON(needs.plan.outputs.regionen) }}
     env:
       NAME: ${{ matrix.region.name }}
+      AUSZUEGE: ${{ toJSON(matrix.region.auszuege) }}
       VERSION: ${{ needs.plan.outputs.version }}
     steps:
       - name: Platz
@@ -270,6 +288,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: auszug-${{ matrix.region.name }}
+          path: auszug
 
       - uses: actions/download-artifact@v8
         with:
@@ -303,16 +322,16 @@ jobs:
           [ -x /usr/bin/time ] || sudo apt-get install -y -qq time
           mkdir -p rand
           /usr/bin/time -v -o zeit.txt builder/wegegraph region builder/regionen.txt builder "$NAME" \
-            "graph/$VERSION" "$NAME.osm.pbf" $(find rand -name "*-$NAME.rand" | sort) | tee bau.log | grep -v '^Zeilen'
+            "graph/$VERSION" auszug/*.osm.pbf $(find rand -name "*-$NAME.rand" | sort) | tee bau.log | grep -v '^Zeilen'
           grep -E 'Maximum resident|Elapsed' zeit.txt
-          rm "$NAME.osm.pbf"
+          rm -r auszug
           df -h .
 
       # Grenzen: je Kachel 25 MiB (Auslieferung), je Archiv 2 GiB (Release-Datei bei GitHub)
       - name: Prüfen und packen
         run: |
           kacheln=$(find "graph/$VERSION" -name '*.bin' | wc -l)
-          # Eine Region kann ohne eigene Kachel sein (Monaco: seine Kacheln gehören Frankreich).
+          # Eine Region kann ohne eigene Kachel sein (alle ihre Kacheln gehören einer Region weiter vorn in der Liste).
           read -r groesste groesste_kachel < <(find "graph/$VERSION" -name '*.bin' -printf '%s %P\n' | sort -n | tail -1) || true
           summe=$(find "graph/$VERSION" -name '*.bin' -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
           archiv="wegegraph-$NAME.tar.gz"
@@ -323,7 +342,8 @@ jobs:
           [ "$archiv_bytes" -le $((2 * 1024 * 1024 * 1024)) ] || { echo "::error::$archiv größer als 2 GiB"; fehler=1; }
           [ $fehler = 0 ]
           mkdir -p messung
-          jq -n --arg name "$NAME" --arg auszug "${{ matrix.region.auszug }}" --arg quelle "${{ matrix.region.datei }}" \
+          jq -n --arg name "$NAME" --arg auszug "$(jq -r 'map(.auszug) | join(",")' <<< "$AUSZUEGE")" \
+            --arg quelle "$(jq -r 'map(.datei) | join(", ")' <<< "$AUSZUEGE")" \
             --argjson auszug_bytes "${{ matrix.region.groesse }}" \
             --argjson kacheln "$kacheln" --argjson bytes "$summe" --arg archiv "$archiv" \
             --argjson archiv_bytes "$archiv_bytes" --arg sha256 "$(sha256sum "$archiv" | cut -d' ' -f1)" \
