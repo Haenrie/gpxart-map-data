@@ -57,8 +57,8 @@ Land und nächstgrößere Stadt unterscheiden gleichnamige Orte.
 ## Teile
 
 Die Wörter eines Namens sind die Folgen aus `a`–`z` und `0`–`9`, nachdem der Name klein geschrieben und gefaltet ist
-(Tabelle `FALTUNG` in `src/orte.rs`: `ä` → `a`, `ß` → `ss`, `é` → `e`, `ł` → `l` …); alle anderen Zeichen trennen
-Wörter. Ein Ort steht im Teil der ersten beiden Buchstaben jedes Wortes, beim ersten Wort aus mindestens zwei
+(Tabelle `FALTUNG` in `src/orte.rs`: `ä` → `a`, `ß` → `ss`, `é` → `e`, `ł` → `l` …). Einzelne Akzentzeichen
+(U+0300–U+036F) fallen weg, so wird `İ` zu `i`; alle anderen Zeichen trennen Wörter. Ein Ort steht im Teil der ersten beiden Buchstaben jedes Wortes, beim ersten Wort aus mindestens zwei
 Buchstaben immer, bei weiteren ab drei Buchstaben, und zwar für den Namen und die Namen in anderen Sprachen.
 „Landsberg am Lech“ steht also in `la.json` und `le.json`, „München“ (englisch „Munich“) einmal in `mu.json`,
 „L'Isle-Adam“ in `is.json` und `ad.json` (in Format 1 stand er auch in `l.json`, Teile aus einem Buchstaben gibt es

@@ -48,10 +48,22 @@ fn staedte_doerfer_und_stadtteile_kommen_unter_jedem_wortanfang_ins_verzeichnis(
         10.90,
         &[("amenity", "townhall"), ("name", "Lechrathaus")],
     );
+    orte.add_node(
+        7,
+        48.08,
+        10.91,
+        &[("place", "village"), ("name", "İskenderun")],
+    );
 
     let verzeichnis = Verzeichnis::lies(&orte);
 
-    assert_eq!(verzeichnis.anzahl, 3);
+    assert_eq!(verzeichnis.anzahl, 4);
+    assert_eq!(
+        verzeichnis.eintrag("is", "İskenderun")[1],
+        "village",
+        "„İ“ ist ein i, kein Wortende"
+    );
+    assert!(verzeichnis.teil("sk").is_none());
     let landsberg = verzeichnis.eintrag("la", "Landsberg am Lech");
     assert_eq!(landsberg[1], "town");
     assert_eq!(

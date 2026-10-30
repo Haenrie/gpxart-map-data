@@ -768,6 +768,8 @@ pub(crate) fn woerter(name: &str) -> Vec<String> {
     for c in name.chars().flat_map(char::to_lowercase) {
         match c {
             'a'..='z' | '0'..='9' => gefaltet.push(c),
+            // Einzelne Akzentzeichen trennen kein Wort: Klein geschrieben wird „İ“ zu „i“ und einem Punkt darüber.
+            '\u{300}'..='\u{36f}' => {}
             c => match FALTUNG.iter().find(|(von, _)| von.contains(c)) {
                 Some((_, nach)) => gefaltet.push_str(nach),
                 None => gefaltet.push(' '),
