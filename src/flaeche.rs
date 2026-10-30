@@ -40,6 +40,11 @@ impl Flaeche {
         }
     }
 
+    /// Rahmen (Süd, West, Nord, Ost) in Grad
+    pub(crate) fn rahmen(&self) -> (f64, f64, f64, f64) {
+        (self.sued, self.west, self.nord, self.ost)
+    }
+
     /// Strahlprobe nach Osten: Liegt der Punkt innen? Innere Ringe (Enklaven) zählen von selbst richtig.
     pub(crate) fn enthaelt(&self, lat: f64, lon: f64) -> bool {
         if lat < self.sued || lat > self.nord || lon < self.west || lon > self.ost {

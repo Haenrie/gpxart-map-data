@@ -13,14 +13,29 @@ west  test/west  DE
 ost   test/ost   AT
 ";
 
-fn umriss(name: &str) -> Result<String, String> {
-    let (w, o) = match name {
-        "west" => (9.0, 10.86),
-        "ost" => (10.84, 12.0),
-        _ => return Err(format!("kein Umriss für {name}")),
-    };
+/// Wie `LISTE`, aber „west“ aus zwei Auszügen, die sich bei 10,8° O mitten im Straßengitter treffen
+const ZWEI_AUSZUEGE: &str = "\
+west  test/west-a,test/west-b  DE
+ost   test/ost                 AT
+";
+
+/// Westen und Osten der Umrisse in Grad Länge, Süden und Norden 47,5° und 48,5° N
+fn umriss_grenzen(auszug: &str) -> Option<(f64, f64)> {
+    Some(match auszug {
+        "test/west" => (9.0, 10.86),
+        "test/west-a" => (9.0, 10.81),
+        "test/west-b" => (10.79, 10.86),
+        "test/ost" => (10.84, 12.0),
+        // steckt ganz in „west“ und „ost“
+        "test/mitte" => (10.5, 11.0),
+        _ => return None,
+    })
+}
+
+fn umriss(auszug: &str) -> Result<String, String> {
+    let (w, o) = umriss_grenzen(auszug).ok_or(format!("kein Umriss für {auszug}"))?;
     Ok(format!(
-        "{name}\n1\n {w} 47.5\n {o} 47.5\n {o} 48.5\n {w} 48.5\nEND\nEND\n"
+        "{auszug}\n1\n {w} 47.5\n {o} 47.5\n {o} 48.5\n {w} 48.5\nEND\nEND\n"
     ))
 }
 
@@ -65,6 +80,12 @@ fn wege() -> Vec<Weg> {
 /// Auszug wie bei Geofabrik: alle Wege mit mindestens einem Knoten im Umriss (Länge von, bis), mit allen Knoten
 fn auszug(wege: &[Weg], von: f64, bis: f64) -> OsmExtract {
     let mut osm = OsmExtract::default();
+    dazu(&mut osm, wege, von, bis);
+    osm
+}
+
+/// Liest einen weiteren Auszug dazu, wie mehrere Eingabedateien einer Region
+fn dazu(osm: &mut OsmExtract, wege: &[Weg], von: f64, bis: f64) {
     for (id, knoten, tags) in wege {
         if knoten.iter().any(|&(_, _, lon)| (von..=bis).contains(&lon)) {
             for &(k, lat, lon) in knoten {
@@ -74,7 +95,6 @@ fn auszug(wege: &[Weg], von: f64, bis: f64) -> OsmExtract {
             osm.add_way(*id, &ids, tags);
         }
     }
-    osm
 }
 
 /// Alle Kacheln mit Knoten
@@ -87,17 +107,30 @@ fn mit_wegen(kacheln: BTreeMap<(u32, u32), Vec<u8>>) -> BTreeMap<(u32, u32), Vec
 
 #[test]
 fn regionen_bauen_dieselben_kacheln_wie_ein_stueck_jede_genau_einmal() {
-    let regionen = Regionen::neu(LISTE, umriss).unwrap();
     let wege = wege();
-    let ganz = auszug(&wege, -180.0, 180.0);
-    let bereich = ganz.extent().unwrap();
-    let erwartet = mit_wegen(build_tiles(&ganz, &bereich));
-
-    let mut auszuege = [auszug(&wege, 9.0, 10.86), auszug(&wege, 10.84, 12.0)];
+    let auszuege = [auszug(&wege, 9.0, 10.86), auszug(&wege, 10.84, 12.0)];
     assert!(
-        auszuege[1].way_count() < ganz.way_count(),
+        auszuege[1].way_count() < auszug(&wege, -180.0, 180.0).way_count(),
         "die Fähre fehlt im Auszug von „ost“"
     );
+    wie_ein_stueck(LISTE, auszuege);
+}
+
+#[test]
+fn eine_region_aus_zwei_auszuegen_baut_dieselben_kacheln() {
+    let wege = wege();
+    let mut west = auszug(&wege, 9.0, 10.81);
+    dazu(&mut west, &wege, 10.79, 10.86);
+    wie_ein_stueck(ZWEI_AUSZUEGE, [west, auszug(&wege, 10.84, 12.0)]);
+}
+
+/// Baut jede Region der Liste aus ihrem Auszug und den Randwegen der anderen und vergleicht mit einem Bau in einem
+/// Stück.
+fn wie_ein_stueck(liste: &str, mut auszuege: [OsmExtract; 2]) {
+    let regionen = Regionen::neu(liste, umriss).unwrap();
+    let ganz = auszug(&wege(), -180.0, 180.0);
+    let bereich = ganz.extent().unwrap();
+    let erwartet = mit_wegen(build_tiles(&ganz, &bereich));
     let randwege: Vec<_> = auszuege
         .iter()
         .enumerate()
@@ -168,8 +201,17 @@ fn die_liste_der_regionen_wird_geprueft() {
     for (liste, fehler) in [
         ("", "keine Regionen"),
         ("west\n", "Zeile 1"),
-        ("west test/west\nwest test/ost\n", "doppelt"),
+        ("west test/west\nwest test/ost\n", "Region west doppelt"),
+        (
+            "west test/west\nost test/ost,test/west\n",
+            "Auszug test/west doppelt",
+        ),
+        ("west test/west,\n", "ungültig"),
         ("West test/west\n", "ungültig"),
+        (
+            "west test/west\nost test/ost\nmitte test/mitte\n",
+            "Region mitte liegt zu 100 % in west, ost",
+        ),
     ] {
         let e = Regionen::neu(liste, umriss).err().unwrap();
         assert!(e.contains(fehler), "{liste:?}: {e}");
@@ -180,4 +222,14 @@ fn die_liste_der_regionen_wird_geprueft() {
             .unwrap()
             .contains("kein Umriss")
     );
+}
+
+#[test]
+fn der_umriss_einer_region_aus_mehreren_auszuegen_ist_die_vereinigung() {
+    let regionen = Regionen::neu(ZWEI_AUSZUEGE, umriss).unwrap();
+    assert_eq!(regionen.alle()[0].auszuege, ["test/west-a", "test/west-b"]);
+    // Mitte 10,767° O nur im Umriss von west-a, Mitte 10,854° O in west-b (und ost)
+    assert_eq!(regionen.besitzer(2170, 1422), 0);
+    assert_eq!(regionen.besitzer(2171, 1422), 0);
+    assert_eq!(regionen.besitzer(2172, 1422), 1);
 }
