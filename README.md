@@ -198,8 +198,37 @@ gpxart.com holt jedes Quartal das neueste Release ab und liefert es aus; dieses 
 
 ## Größen und Grenzen (gemessen)
 
-Probelauf auf GitHub Actions mit den Geofabrik-Auszügen vom 28.10.2026 (Lauf 40879450270, 40 min für alles; die
-Regionen laufen nebeneinander):
+**Ganz Europa** ohne Russland, Probelauf auf GitHub Actions (Branch `probelauf/europa`, Lauf 41047593278, Auszüge vom
+28.10.2026) mit 45 Auszügen in 13 Regionen: alle Jobs grün, **44 min für alles**, kein Job über 6,6 GiB Speicher.
+
+| Region | Auszüge | Kacheln | Größe, gepackt | größte Kachel | Randwege (Schritt 1) | Kacheln (Schritt 2) |
+|---|---|---|---|---|---|---|
+| `dach` | 6,26 GB | 12 853 | 1 231 MB, 657 MB | 1,38 MB | 5:42, 6,6 GiB | 8:27, 6,6 GiB |
+| `france` (+ Monaco, Andorra) | 5,11 GB | 14 022 | 967 MB, 525 MB | 1,83 MB | 4:01, 5,2 GiB | 4:19, 5,2 GiB |
+| `norden` (NO, SE, DK, FI, IS, FO) | 3,66 GB | 65 478 | 751 MB, 417 MB | 1,01 MB | 2:31, 3,1 GiB | 3:24, 3,2 GiB |
+| `britain` (GB, IE, IM, GG, JE) | 2,64 GB | 12 587 | 560 MB, 311 MB | 1,28 MB | 2:04, 3,1 GiB | 2:13, 3,1 GiB |
+| `italia` (+ Malta) | 2,26 GB | 8 659 | 605 MB, 324 MB | 1,44 MB | 1:54, 3,3 GiB | 2:47, 3,3 GiB |
+| `benelux` | 2,15 GB | 2 030 | 209 MB, 115 MB | 1,10 MB | 1:40, 1,1 GiB | 1:41, 1,4 GiB |
+| `polska` | 2,11 GB | 9 013 | 393 MB, 215 MB | 1,59 MB | 1:48, 2,1 GiB | 2:23, 2,1 GiB |
+| `iberia` (ES, PT, Azoren) | 1,94 GB | 13 719 | 799 MB, 423 MB | 1,86 MB | 1:30, 4,1 GiB | 2:17, 4,1 GiB |
+| `mitte` (CZ, SK, HU, SI) | 1,94 GB | 5 658 | 340 MB, 183 MB | 1,16 MB | 1:06, 1,4 GiB | 1:42, 1,9 GiB |
+| `suedosten` (11 Länder) | 1,71 GB | 18 304 | 632 MB, 343 MB | 1,11 MB | 0:53, 2,6 GiB | 2:03, 2,7 GiB |
+| `osten` (UA, BY) | 1,23 GB | 21 346 | 323 MB, 179 MB | 0,91 MB | 0:54, 1,3 GiB | 1:15, 1,4 GiB |
+| `tuerkei` (+ Georgien, Zypern) | 0,79 GB | 16 674 | 425 MB, 232 MB | 0,83 MB | 0:28, 1,8 GiB | 0:43, 2,0 GiB |
+| `baltikum` | 0,49 GB | 6 838 | 107 MB, 60 MB | 0,76 MB | 0:20, 0,4 GiB | 0:27, 0,5 GiB |
+| zusammen | 32,3 GB | 207 181 | 7,34 GB, 3,99 GB | | | |
+
+Der längste Weg sind `france` und `dach`: Download 13 bzw. 11 min, Randwege, Übergabe, Kacheln. Randwege je Region
+höchstens 33 MB (`mitte`). Platte: 88 GB frei, nach dem Aufräumen 110 GB. Ortsverzeichnis Europa: 1 094 088 Orte in
+521 Ländern, 1:34 min und 1 GiB im Job `veroeffentlichen`; mit Format 2 (gpxart.com #90) 3 922 Dateien, 96 MB, größter
+Teil 300 kB.
+
+**Grenzen einmal lokal geprüft** (Windows-PC, Auszüge vom 28.10.2026): `netherlands`, `belgium`, `luxembourg`,
+`denmark` und `sweden` als fünf Regionen gegen alle fünf in einem Stück: 27 735 Kacheln, alle byte-gleich, keine fehlt,
+keine doppelt; darin die Enklaven Baarle-Hertog/-Nassau, das Dreiländereck, der Øresund und Fähren über das Kattegat.
+
+Probelauf mit `dach`, `france`, `monaco` und `andorra` als vier Regionen (Auszüge vom 28.10.2026, Lauf 40879450270,
+40 min für alles; die Regionen laufen nebeneinander):
 
 | Region | Auszug | Kacheln | Größe, gepackt | größte Kachel | Randwege (Schritt 1) | Kacheln (Schritt 2) |
 |---|---|---|---|---|---|---|
