@@ -74,7 +74,7 @@ impl OsmExtract {
 
 /// Sortiert die Liste nach ID und entfernt doppelte IDs, falls die neuen Einträge ab `before` das nötig machen.
 /// Geofabrik-Dateien sind nach ID sortiert; bei nur einer Eingabedatei bleibt es beim Prüfen.
-fn sort_dedup<T>(v: &mut Vec<T>, before: usize, id: impl Fn(&T) -> i64) {
+pub(crate) fn sort_dedup<T>(v: &mut Vec<T>, before: usize, id: impl Fn(&T) -> i64) {
     let sorted = v
         .windows(2)
         .skip(before.saturating_sub(1))

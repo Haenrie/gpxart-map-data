@@ -6,9 +6,12 @@
 //! nach OSM-ID sortierten Listen (statt in Maps), von jedem Weg bleibt statt der Tags nur der Verweis auf seine
 //! Stellen, und die Kacheln entstehen streifenweise (`build_tiles` für einen Teilbereich).
 
+mod flaeche;
 mod format;
 mod orte;
 mod pbf;
+mod randwege;
+mod regionen;
 mod rules;
 mod tiling;
 
@@ -16,8 +19,9 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 pub use orte::{Orte, Ortsverzeichnis};
+pub use regionen::{Region, Regionen};
 use rules::{Stellen, Tags};
-pub use tiling::build_tiles;
+pub use tiling::{build_tiles, build_tiles_of};
 
 /// OSM-Ausschnitt im Speicher: Knoten-Koordinaten und Wege mit ihren Stellen.
 ///

@@ -65,6 +65,14 @@ pub(crate) fn project(lat: f64, lon: f64) -> (i64, i64) {
     (x.round() as i64, y.round() as i64)
 }
 
+/// Breite und Länge der Mitte einer z12-Kachel in Grad.
+pub(crate) fn mitte(x: u32, y: u32) -> (f64, f64) {
+    let (mx, my) = (x as f64 + 0.5, y as f64 + 0.5);
+    let n = (1u64 << ZOOM) as f64;
+    let lat = (PI * (1.0 - 2.0 * my / n)).sinh().atan().to_degrees();
+    (lat, mx / n * 360.0 - 180.0)
+}
+
 fn haversine_m((lat1, lon1): (f64, f64), (lat2, lon2): (f64, f64)) -> f64 {
     let (p1, p2) = (lat1.to_radians(), lat2.to_radians());
     let dp = p2 - p1;
@@ -77,14 +85,14 @@ fn haversine_m((lat1, lon1): (f64, f64), (lat2, lon2): (f64, f64)) -> f64 {
 pub(crate) struct Index {
     /// Je Eintrag in `OsmExtract::refs` der Index des Knotens in `OsmExtract::nodes`, `FEHLT` für einen Knoten,
     /// der nicht in der Eingabe steht (Rand der Eingabedatei).
-    refs: Vec<u32>,
+    pub(crate) refs: Vec<u32>,
     /// Je Knoten: wie oft er in Wegen vorkommt, höchstens 2. Mehr als einmal heißt Kreuzung.
     uses: Vec<u8>,
     /// Je Weg sein Umriss in Kachelnummern (x0, y0, x1, y1); ohne bekannten Knoten leer (x0 > x1).
     tiles: Vec<[u32; 4]>,
 }
 
-const FEHLT: u32 = u32::MAX;
+pub(crate) const FEHLT: u32 = u32::MAX;
 
 impl Index {
     fn new(osm: &OsmExtract) -> Index {
@@ -136,7 +144,7 @@ fn parallel<T: Sync, U: Send + Clone + Default>(items: &[T], f: impl Fn(&T) -> U
 }
 
 impl OsmExtract {
-    fn index(&self) -> &Index {
+    pub(crate) fn index(&self) -> &Index {
         self.index.get_or_init(|| Index::new(self))
     }
 }
@@ -167,8 +175,41 @@ pub(crate) fn extent(osm: &OsmExtract) -> Option<TileRange> {
 /// Eine Kachel hängt nur von den Wegen ab, die sie berühren; ein großes Gebiet lässt sich darum in Teilbereichen
 /// bauen (`TileRange::bands`), mit denselben Kacheln wie in einem Stück.
 pub fn build_tiles(osm: &OsmExtract, range: &TileRange) -> BTreeMap<(u32, u32), Vec<u8>> {
+    let mut tiles = graphs(osm, range, |_, _| true);
+    let mut out = BTreeMap::new();
+    for x in range.x0..=range.x1 {
+        for y in range.y0..=range.y1 {
+            let graph = tiles.remove(&(x, y)).unwrap_or_default();
+            out.insert((x, y), graph.encode(x, y));
+        }
+    }
+    out
+}
+
+/// Wie `build_tiles`, aber nur die Kacheln mit Wegen, die `wahl` nimmt (die einer Region, `Regionen::besitzer`);
+/// `wahl` wird je Kachel einmal gefragt.
+pub fn build_tiles_of(
+    osm: &OsmExtract,
+    range: &TileRange,
+    wahl: impl FnMut(u32, u32) -> bool,
+) -> BTreeMap<(u32, u32), Vec<u8>> {
+    graphs(osm, range, wahl)
+        .into_iter()
+        .map(|((x, y), graph)| ((x, y), graph.encode(x, y)))
+        .collect()
+}
+
+/// Die Graphen der Kacheln im Bereich, die `wahl` nimmt
+fn graphs(
+    osm: &OsmExtract,
+    range: &TileRange,
+    mut wahl: impl FnMut(u32, u32) -> bool,
+) -> HashMap<(u32, u32), TileGraph> {
     let index = osm.index();
     let mut tiles: HashMap<(u32, u32), TileGraph> = HashMap::new();
+    let mut gewaehlt: HashMap<(u32, u32), bool> = HashMap::new();
+    // Aufeinanderfolgende Kanten liegen meist in derselben Kachel.
+    let mut zuletzt = ((u32::MAX, u32::MAX), false);
     for (way, t) in osm.ways.iter().zip(&index.tiles) {
         if t[0] > range.x1 || t[2] < range.x0 || t[1] > range.y1 || t[3] < range.y0 {
             continue;
@@ -181,10 +222,13 @@ pub fn build_tiles(osm: &OsmExtract, range: &TileRange) -> BTreeMap<(u32, u32), 
                 continue;
             }
             let (points, lengths) = expand(osm, &index.uses, way.id, &mut splits, run);
-            compress(&points, &lengths, |a, b, len| {
-                let tx = (a.x + b.x).div_euclid(2 * EXTENT) as u32;
-                let ty = (a.y + b.y).div_euclid(2 * EXTENT) as u32;
-                if range.contains(tx, ty) {
+            compress(&points, &lengths, |a, b, len, (tx, ty)| {
+                if zuletzt.0 != (tx, ty) {
+                    let nimmt = range.contains(tx, ty)
+                        && *gewaehlt.entry((tx, ty)).or_insert_with(|| wahl(tx, ty));
+                    zuletzt = ((tx, ty), nimmt);
+                }
+                if zuletzt.1 {
                     tiles
                         .entry((tx, ty))
                         .or_default()
@@ -193,15 +237,38 @@ pub fn build_tiles(osm: &OsmExtract, range: &TileRange) -> BTreeMap<(u32, u32), 
             });
         }
     }
+    tiles
+}
 
-    let mut out = BTreeMap::new();
-    for x in range.x0..=range.x1 {
-        for y in range.y0..=range.y1 {
-            let graph = tiles.remove(&(x, y)).unwrap_or_default();
-            out.insert((x, y), graph.encode(x, y));
+/// Meldet zu jedem Weg (Nummer in `OsmExtract::ways`) die Kacheln, in denen er Stücke hat, also alle, in denen er
+/// Kanten hat; eine Kachel auch mehrmals.
+pub(crate) fn kacheln_der_wege(osm: &OsmExtract, mut f: impl FnMut(usize, u32, u32)) {
+    let index = osm.index();
+    for (w, (way, t)) in osm.ways.iter().zip(&index.tiles).enumerate() {
+        if t[0] > t[2] {
+            continue;
+        }
+        if (t[0], t[1]) == (t[2], t[3]) {
+            f(w, t[0], t[1]);
+            continue;
+        }
+        let kachel = |x: i64, y: i64| (x.div_euclid(EXTENT) as u32, y.div_euclid(EXTENT) as u32);
+        let mut splits = 0;
+        for run in index.refs[way.start..way.start + way.len as usize].split(|&i| i == FEHLT) {
+            if run.len() < 2 {
+                continue;
+            }
+            let (points, _) = expand(osm, &index.uses, way.id, &mut splits, run);
+            // Kanten liegen in der Kachel der Mitte des ersten Stücks ihrer Kette (`emit_chain`).
+            for p in points.windows(2) {
+                let (x, y) = kachel(
+                    (p[0].x + p[1].x).div_euclid(2),
+                    (p[0].y + p[1].y).div_euclid(2),
+                );
+                f(w, x, y);
+            }
         }
     }
-    out
 }
 
 /// Punktfolge eines Weglaufs (Knoten-Indizes) mit eingefügten Kachelgrenz- und Teilungspunkten, dazu die Länge
@@ -281,8 +348,12 @@ fn cuts(a: (i64, i64), b: (i64, i64), seg_m: f64) -> Vec<(f64, Option<i64>, Opti
     merged
 }
 
-/// Fasst die Punktfolge zu Kanten zusammen und meldet jede Kante mit ihrer Länge in m.
-fn compress(points: &[Point], lengths: &[f64], mut emit: impl FnMut(&Point, &Point, f64)) {
+/// Fasst die Punktfolge zu Kanten zusammen und meldet jede Kante mit ihrer Länge in m und ihrer Kachel.
+fn compress(
+    points: &[Point],
+    lengths: &[f64],
+    mut emit: impl FnMut(&Point, &Point, f64, (u32, u32)),
+) {
     let mut start = 0;
     let mut acc = 0.0;
     for i in 1..points.len() {
@@ -296,7 +367,20 @@ fn compress(points: &[Point], lengths: &[f64], mut emit: impl FnMut(&Point, &Poi
 
 /// Eine Kette (Anfang und Ende werden Knoten) als Kanten: Zwischenpunkte nach Douglas-Peucker mit
 /// `MAX_ABWEICHUNG_M`, Länge jeder Kante entlang des OSM-Weges.
-fn emit_chain(chain: &[Point], lengths: &[f64], emit: &mut impl FnMut(&Point, &Point, f64)) {
+///
+/// Alle Kanten der Kette liegen in ihrer Kachel: der Kachel der Mitte ihres ersten Stücks. Zwischenpunkte liegen nie
+/// auf einer Kachelgrenze (Randknoten beenden eine Kette), die Mitte jedes Stücks mit Zwischenpunkt also im Inneren
+/// der Kachel. Darum hängt eine Kachel nur von den Wegen ab, die darin Stücke haben, auch wenn eine Kante nach
+/// Douglas-Peucker genau auf der Grenze liegt.
+fn emit_chain(
+    chain: &[Point],
+    lengths: &[f64],
+    emit: &mut impl FnMut(&Point, &Point, f64, (u32, u32)),
+) {
+    let kachel = (
+        (chain[0].x + chain[1].x).div_euclid(2 * EXTENT) as u32,
+        (chain[0].y + chain[1].y).div_euclid(2 * EXTENT) as u32,
+    );
     let last = chain.len() - 1;
     let mut node = vec![false; chain.len()];
     (node[0], node[last]) = (true, true);
@@ -306,7 +390,7 @@ fn emit_chain(chain: &[Point], lengths: &[f64], emit: &mut impl FnMut(&Point, &P
     for i in 1..=last {
         len += lengths[i - 1];
         if node[i] {
-            emit(&chain[from], &chain[i], len);
+            emit(&chain[from], &chain[i], len, kachel);
             (from, len) = (i, 0.0);
         }
     }

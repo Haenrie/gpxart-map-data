@@ -29,14 +29,20 @@ Einwohnerzahl (`population`) nennt:
 Flächen (Wege und Relationen mit `place=*`) zählen nicht. Steht ein Knoten in mehreren Eingabedateien, zählt er
 einmal.
 
-**Land.** Ein Ort liegt im Land (Bundesland, Kanton), dessen Grenz-Relation ihn umschließt (`boundary=administrative`,
-`admin_level=4`, `ISO3166-2` mit `DE-`, `AT-` oder `CH-`), sonst im Staat (`admin_level=2`, `ISO3166-1` `DE`, `AT`,
-`CH` oder `LI`; so Liechtenstein). Fehlen einer Grenze einzelne Wege (höchstens 5 %), schließen gerade Linien
-zwischen den offenen Enden die Ringe, solange die Lücken zusammen höchstens 100 km lang sind (im DACH-Auszug fehlt
-z. B. ein Stück der Grenze im Genfersee); sonst bleibt die Grenze unberücksichtigt. Gibt es mindestens eine
-vollständige Staatsgrenze, fallen Orte
-außerhalb aller Grenzen weg (der Geofabrik-Auszug reicht etwas über DACH hinaus). In Teilauszügen ohne Staatsgrenzen
-bleiben alle Orte, dann teils ohne Land.
+**Land.** Ein Ort liegt im Land, dessen Grenz-Relation ihn umschließt (`boundary=administrative`, `admin_level=4`,
+`ISO3166-2`: Bundesland, Kanton, in Frankreich die Région wie `FR-GES` Grand Est), sonst im Staat (`admin_level=2`,
+`ISO3166-1`; so Liechtenstein, Monaco, Andorra). Es zählen nur die Grenzen der Staaten, die die Region in
+`regionen.txt` nennt (DACH: `DE`, `AT`, `CH`, `LI`; Frankreich: `FR`). Fehlen einer Grenze einzelne Wege (höchstens
+5 %), schließen gerade Linien zwischen den offenen Enden die Ringe, solange die Lücken zusammen höchstens 100 km lang
+sind (im DACH-Auszug fehlt z. B. ein Stück der Grenze im Genfersee); fehlen nur ganze Ringe (die Grenze von Frankreich
+umfasst auch die Überseegebiete, die nicht im Auszug sind), zählt die Grenze mit den vorhandenen Ringen; sonst bleibt
+sie unberücksichtigt. Gibt es mindestens eine vollständige Staatsgrenze, fallen Orte außerhalb aller Grenzen weg (ein
+Geofabrik-Auszug reicht etwas über seine Staaten hinaus). In Teilauszügen ohne Staatsgrenzen bleiben alle Orte, dann
+teils ohne Land.
+
+**Regionen.** Jede Region schreibt ihre Orte mit Land in eine Ortsliste (`wegegraph ortsliste`); aus den Listen aller
+Regionen entsteht das eine Verzeichnis (`wegegraph ortsverzeichnis`), mit der nächstgrößeren Stadt über die Grenzen
+der Regionen hinweg. Steht ein Ort in mehreren Listen, zählt er einmal, mit Land, wenn eine Liste es kennt.
 
 **Nächstgrößere Stadt.** Stadtteile, Viertel, Dörfer und Weiler nennen eine Stadt (`city` oder `town`), auf die man
 sich bei ihnen bezieht: die mit der kleinsten Entfernung geteilt durch die vierte Wurzel ihrer Größe. So gilt die

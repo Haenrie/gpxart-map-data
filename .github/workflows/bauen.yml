@@ -1,0 +1,465 @@
+# Baut den Wegegraphen und das Ortsverzeichnis für alle Regionen aus regionen.txt (je ein Geofabrik-Auszug) und
+# veröffentlicht sie als ein Release.
+#
+#   Vierteljährlich   am 1. Januar, April, Juli und Oktober um 02:17 UTC
+#   Von Hand    „Run workflow“, auf Wunsch als Probelauf
+#   Probelauf   Push auf einen Branch probelauf/…: baut und misst alles, legt aber kein Release an
+#
+# Ablauf (README, „Regionen“): „plan“ legt Version, Auszüge und Umrisse fest und baut den Builder. Dann je Region
+# „randwege“: Auszug laden, Randwege für die Nachbarn und Ortsliste schreiben. Danach je Region „kacheln“: die Kacheln
+# der Region aus ihrem Auszug und den Randwegen der Nachbarn bauen, prüfen (je Kachel 25 MiB), packen (je Archiv
+# 2 GiB) und ins Release laden. Zuletzt „veroeffentlichen“: Ortsverzeichnis aus allen Ortslisten, Zeiger,
+# wegegraph.json und SHA256SUMS; das Release wird erst dann sichtbar.
+#
+# Die Version ist das Datum der OSM-Daten plus der Commit des Builders, z. B. 2026-10-18-1a2b3c4, über alle Regionen
+# gleich; gibt es sie schon, baut der Lauf nichts. gpxart.com holt das Release ab und liefert es aus; dieses Repo
+# braucht dafür keine Geheimnisse.
+
+name: Wegegraph bauen
+
+on:
+  schedule:
+    - cron: '17 2 1 1,4,7,10 *'
+  workflow_dispatch:
+    inputs:
+      probelauf:
+        description: Probelauf (alles bauen und messen, kein Release)
+        type: boolean
+        default: false
+  push:
+    branches: ['probelauf/**']
+
+permissions:
+  contents: write # Release anlegen
+
+concurrency:
+  group: ${{ (github.event_name == 'push' || inputs.probelauf) && format('probelauf-{0}', github.ref) || 'bauen' }}
+  cancel-in-progress: false
+
+env:
+  GEOFABRIK: https://download.geofabrik.de
+  BEHALTEN: 3 # so viele Releases bleiben, ältere werden gelöscht
+  PROBELAUF: ${{ github.event_name == 'push' || inputs.probelauf == true }}
+
+jobs:
+  plan:
+    name: Version, Auszüge, Builder
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      datum: ${{ steps.version.outputs.datum }}
+      neu: ${{ steps.version.outputs.neu }}
+      regionen: ${{ steps.version.outputs.regionen }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Je Region die Datei hinter <Auszug>-latest.osm.pbf, z. B. dach-261018.osm.pbf. Alle Regionen bekommen das
+      # älteste Datum darunter (Geofabrik aktualisiert die Auszüge nacheinander und hält ältere Tage eine Woche vor),
+      # damit die Daten aller Regionen vom selben Tag sind.
+      - name: Version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          grep -v '^\s*#' regionen.txt | awk 'NF { print $1, $2 }' > regionen.lst
+          [ -s regionen.lst ] || { echo "::error::keine Regionen in regionen.txt"; exit 1; }
+          datum=
+          while read -r name auszug; do
+            datei=$(curl -fsSI "$GEOFABRIK/$auszug-latest.osm.pbf" | tr -d '\r' \
+              | awk 'tolower($1) == "location:" { print $2 }' | xargs basename)
+            [[ $datei =~ -([0-9]{6})\.osm\.pbf$ ]] || { echo "::error::$auszug: unerwartet $datei"; exit 1; }
+            echo "$name: $datei"
+            [ -z "$datum" ] || [ "${BASH_REMATCH[1]}" -lt "$datum" ] && datum=${BASH_REMATCH[1]}
+          done < regionen.lst
+          regionen=$(while read -r name auszug; do
+            datei="$(basename "$auszug")-$datum.osm.pbf"
+            url="$GEOFABRIK/$(dirname "$auszug")/$datei"
+            groesse=$(curl -fsSI "$url" | tr -d '\r' | awk 'tolower($1) == "content-length:" { print $2 }')
+            [ -n "$groesse" ] || { echo "::error::$url fehlt" >&2; exit 1; }
+            jq -cn --arg name "$name" --arg auszug "$auszug" --arg url "$url" --arg datei "$datei" \
+              --argjson groesse "$groesse" '$ARGS.named'
+          done < regionen.lst | jq -cs .)
+          datum="20${datum:0:2}-${datum:2:2}-${datum:4:2}"
+          version="$datum-${GITHUB_SHA::7}"
+          echo "Version $version"
+          echo "$regionen" | jq .
+          {
+            echo "datum=$datum"
+            echo "version=$version"
+            echo "regionen=$regionen"
+          } >> "$GITHUB_OUTPUT"
+          neu=true
+          if [ "$PROBELAUF" = true ]; then
+            echo "Probelauf: kein Release." >> "$GITHUB_STEP_SUMMARY"
+          elif entwurf=$(gh release view "$version" --json isDraft --jq .isDraft 2> /dev/null); then
+            if [ "$entwurf" = true ]; then
+              echo "Entwurf $version aus einem abgebrochenen Lauf wird ersetzt."
+              gh release delete "$version" --yes
+            else
+              echo "Release $version gibt es schon, nichts zu tun." | tee -a "$GITHUB_STEP_SUMMARY"
+              neu=false
+            fi
+          fi
+          echo "neu=$neu" >> "$GITHUB_OUTPUT"
+
+      # Umrisse der Regionen: Sie legen fest, welcher Region eine Kachel gehört; alle Läufe nehmen dieselben.
+      - name: Umrisse
+        if: steps.version.outputs.neu == 'true'
+        run: |
+          mkdir -p umrisse
+          while read -r name auszug; do
+            curl -fsS --retry 3 -o "umrisse/$name.poly" "$GEOFABRIK/$auszug.poly"
+          done < regionen.lst
+          cp regionen.txt umrisse/
+          ls -l umrisse
+
+      - name: Rust
+        if: steps.version.outputs.neu == 'true'
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - uses: actions/cache@v6
+        if: steps.version.outputs.neu == 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-bauen-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Tests und Builder
+        if: steps.version.outputs.neu == 'true'
+        run: |
+          cargo test --locked
+          cargo build --release --locked
+          cp target/release/wegegraph umrisse/
+
+      # Leeres Release als Entwurf: Die Läufe der Regionen laden ihre Archive hinein, sichtbar wird es erst am Schluss.
+      - name: Entwurf
+        if: steps.version.outputs.neu == 'true' && env.PROBELAUF != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "$VERSION" --draft --target "$GITHUB_SHA" --title "Wegegraph $VERSION" --notes "wird gebaut"
+
+      - uses: actions/upload-artifact@v7
+        if: steps.version.outputs.neu == 'true'
+        with:
+          name: builder
+          path: umrisse/
+          retention-days: 3
+
+  randwege:
+    name: Randwege ${{ matrix.region.name }}
+    needs: plan
+    if: needs.plan.outputs.neu == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: true
+      matrix:
+        region: ${{ fromJSON(needs.plan.outputs.regionen) }}
+    env:
+      NAME: ${{ matrix.region.name }}
+    steps:
+      - name: Platz
+        run: |
+          nproc; free -h; df -h .
+          # Große Auszüge brauchen mehr als die freien ≈ 14 GB (Auszug, Archiv); vorinstallierte Werkzeuge weg
+          if [ ${{ matrix.region.groesse }} -gt 4000000000 ]; then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+            df -h .
+          fi
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: builder
+          path: builder
+
+      - name: Auszug laden
+        env:
+          URL: ${{ matrix.region.url }}
+        run: |
+          chmod +x builder/wegegraph
+          [ -x /usr/bin/time ] || sudo apt-get install -y -qq time
+          pruefsumme=$(curl -fsS --retry 3 "$URL.md5" | cut -d' ' -f1)
+          curl -fsSL --retry 3 -o "$NAME.osm.pbf" "$URL"
+          echo "$pruefsumme  $NAME.osm.pbf" | md5sum -c -
+          ls -l "$NAME.osm.pbf"
+
+      - name: Randwege
+        run: |
+          /usr/bin/time -v -o zeit.txt builder/wegegraph randwege builder/regionen.txt builder "$NAME" rand "$NAME.osm.pbf"
+          grep -E 'Maximum resident|Elapsed' zeit.txt
+          ls -l rand
+
+      # Ortsliste für das Ortsverzeichnis (docs/ortsverzeichnis-format.md). Fehlt einer Landesgrenze zu viel, bleibt
+      # sie unberücksichtigt; das meldet der Lauf als Warnung.
+      - name: Ortsliste
+        run: |
+          mkdir -p ortsliste
+          /usr/bin/time -v -o zeit-orte.txt builder/wegegraph ortsliste builder/regionen.txt "$NAME" \
+            "ortsliste/$NAME.tsv" "$NAME.osm.pbf" | tee orte.log
+          grep -E 'Maximum resident|Elapsed' zeit-orte.txt
+          grep 'unvollständig' orte.log | while read -r zeile; do echo "::warning::$NAME: $zeile"; done
+          mkdir -p messung
+          jq -n --arg name "$NAME" \
+            --argjson speicher_kb "$(awk -F': ' '/Maximum resident/ { print $2 }' zeit.txt)" \
+            --arg dauer "$(awk -F': ' '/Elapsed/ { print $2 }' zeit.txt)" \
+            --argjson bytes "$(find rand -name '*.rand' -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')" \
+            --argjson ziele "$(find rand -name '*.rand' -printf '%f\n' | sed "s/^$NAME-//; s/\.rand$//" | jq -R . | jq -s .)" \
+            --argjson orte "$(wc -l < "ortsliste/$NAME.tsv")" \
+            --arg orte_dauer "$(awk -F': ' '/Elapsed/ { print $2 }' zeit-orte.txt)" \
+            '{name: $name, ziele: $ziele, bytes: $bytes, speicher_kb: $speicher_kb, dauer: $dauer,
+              orte: $orte, orte_dauer: $orte_dauer}' > "messung/randwege-$NAME.json"
+          cat "messung/randwege-$NAME.json"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rand-${{ matrix.region.name }}
+          path: rand/
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: messung-randwege-${{ matrix.region.name }}
+          path: messung/
+          retention-days: 3
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ortsliste-${{ matrix.region.name }}
+          path: ortsliste/
+          retention-days: 3
+
+      # Der Auszug geht an den Lauf „kacheln“ derselben Region, statt ihn bei Geofabrik ein zweites Mal zu laden.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: auszug-${{ matrix.region.name }}
+          path: ${{ matrix.region.name }}.osm.pbf
+          compression-level: 0
+          retention-days: 1
+
+  kacheln:
+    name: Kacheln ${{ matrix.region.name }}
+    needs: [plan, randwege]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: true
+      matrix:
+        region: ${{ fromJSON(needs.plan.outputs.regionen) }}
+    env:
+      NAME: ${{ matrix.region.name }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Platz
+        run: |
+          nproc; free -h; df -h .
+          if [ ${{ matrix.region.groesse }} -gt 4000000000 ]; then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+            df -h .
+          fi
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: builder
+          path: builder
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: auszug-${{ matrix.region.name }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: messung-randwege-*
+          path: messung
+          merge-multiple: true
+
+      # Nur die Randwege der Regionen, die welche für diese haben
+      - name: Nachbarn
+        id: nachbarn
+        run: |
+          nachbarn=$(jq -r --arg name "$NAME" 'select(.ziele | index($name)) | .name' messung/randwege-*.json | paste -sd,)
+          echo "Randwege für $NAME von: ${nachbarn:-keiner}"
+          case "$nachbarn" in
+            "") muster= ;;
+            *,*) muster="rand-{$nachbarn}" ;;
+            *) muster="rand-$nachbarn" ;;
+          esac
+          echo "muster=$muster" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        if: steps.nachbarn.outputs.muster != ''
+        with:
+          pattern: ${{ steps.nachbarn.outputs.muster }}
+          path: rand
+          merge-multiple: true
+
+      - name: Kacheln bauen
+        run: |
+          chmod +x builder/wegegraph
+          [ -x /usr/bin/time ] || sudo apt-get install -y -qq time
+          mkdir -p rand
+          /usr/bin/time -v -o zeit.txt builder/wegegraph region builder/regionen.txt builder "$NAME" \
+            "graph/$VERSION" "$NAME.osm.pbf" $(find rand -name "*-$NAME.rand" | sort) | tee bau.log | grep -v '^Zeilen'
+          grep -E 'Maximum resident|Elapsed' zeit.txt
+          rm "$NAME.osm.pbf"
+          df -h .
+
+      # Grenzen: je Kachel 25 MiB (Auslieferung), je Archiv 2 GiB (Release-Datei bei GitHub)
+      - name: Prüfen und packen
+        run: |
+          kacheln=$(find "graph/$VERSION" -name '*.bin' | wc -l)
+          # Eine Region kann ohne eigene Kachel sein (Monaco: seine Kacheln gehören Frankreich).
+          read -r groesste groesste_kachel < <(find "graph/$VERSION" -name '*.bin' -printf '%s %P\n' | sort -n | tail -1) || true
+          summe=$(find "graph/$VERSION" -name '*.bin' -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
+          archiv="wegegraph-$NAME.tar.gz"
+          tar -C graph -czf "$archiv" "$VERSION"
+          archiv_bytes=$(stat -c %s "$archiv")
+          fehler=0
+          [ "${groesste:-0}" -le $((25 * 1024 * 1024)) ] || { echo "::error::$groesste_kachel ist größer als 25 MiB"; fehler=1; }
+          [ "$archiv_bytes" -le $((2 * 1024 * 1024 * 1024)) ] || { echo "::error::$archiv größer als 2 GiB"; fehler=1; }
+          [ $fehler = 0 ]
+          mkdir -p messung
+          jq -n --arg name "$NAME" --arg auszug "${{ matrix.region.auszug }}" --arg quelle "${{ matrix.region.datei }}" \
+            --argjson auszug_bytes "${{ matrix.region.groesse }}" \
+            --argjson kacheln "$kacheln" --argjson bytes "$summe" --arg archiv "$archiv" \
+            --argjson archiv_bytes "$archiv_bytes" --arg sha256 "$(sha256sum "$archiv" | cut -d' ' -f1)" \
+            --arg groesste_kachel "${groesste_kachel:-}" --argjson groesste "${groesste:-0}" \
+            --argjson speicher_kb "$(awk -F': ' '/Maximum resident/ { print $2 }' zeit.txt)" \
+            --arg dauer "$(awk -F': ' '/Elapsed/ { print $2 }' zeit.txt)" \
+            '{name: $name, auszug: $auszug, quelle: $quelle, auszug_bytes: $auszug_bytes, kacheln: $kacheln,
+              bytes: $bytes, archiv: $archiv, archiv_bytes: $archiv_bytes, sha256: $sha256,
+              groesste_kachel: {pfad: $groesste_kachel, bytes: $groesste},
+              bau: {speicher_hoechstens_kb: $speicher_kb, dauer: $dauer}}' > "messung/kacheln-$NAME.json"
+          cat "messung/kacheln-$NAME.json"
+
+      - name: Ins Release
+        if: env.PROBELAUF != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$VERSION" "wegegraph-$NAME.tar.gz" --repo "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: messung-kacheln-${{ matrix.region.name }}
+          path: messung/kacheln-${{ matrix.region.name }}.json
+          retention-days: 3
+
+  veroeffentlichen:
+    name: Ortsverzeichnis und Release
+    needs: [plan, kacheln]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      DATUM: ${{ needs.plan.outputs.datum }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: builder
+          path: builder
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ortsliste-*
+          path: ortsliste
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: messung-*
+          path: messung
+          merge-multiple: true
+
+      - name: Ortsverzeichnis
+        run: |
+          chmod +x builder/wegegraph
+          [ -x /usr/bin/time ] || sudo apt-get install -y -qq time
+          /usr/bin/time -v -o zeit-orte.txt builder/wegegraph ortsverzeichnis "orte/$VERSION/orte" ortsliste/*.tsv
+          grep -E 'Maximum resident|Elapsed' zeit-orte.txt
+          tar -C orte -czf ortsverzeichnis.tar.gz "$VERSION"
+
+      - name: Zeiger, wegegraph.json, Prüfsummen
+        run: |
+          mkdir -p zeiger
+          echo "{\"version\":\"$VERSION\"}" > zeiger/aktuell.json
+          quellen=$(jq -r '"  \(.quelle) (\(.auszug))"' messung/kacheln-*.json)
+          cat > zeiger/LIZENZ.txt <<EOF
+          Wegegraph und Ortsverzeichnis für gpxart.com, Version $VERSION
+
+          Daten © OpenStreetMap-Mitwirkende, verfügbar unter der Open Database License (ODbL) 1.0,
+          https://opendatacommons.org/licenses/odbl/1-0/ und https://www.openstreetmap.org/copyright.
+          Wegegraph und Ortsverzeichnis sind aus OpenStreetMap abgeleitete Datenbanken und stehen ebenfalls unter der
+          ODbL 1.0.
+          Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).
+
+          Quellen: Geofabrik-Auszüge (OSM-Daten vom $DATUM)
+          $quellen
+          Gebaut mit https://github.com/$GITHUB_REPOSITORY (Commit $GITHUB_SHA),
+          Format: https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/wegegraph-format.md und
+          https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/ortsverzeichnis-format.md
+          EOF
+          tar -C zeiger -czf zeiger.tar.gz aktuell.json LIZENZ.txt
+
+          orte_dateien=$(find "orte/$VERSION/orte" -name '*.json' | wc -l)
+          orte_bytes=$(find "orte/$VERSION/orte" -name '*.json' -printf '%s\n' | awk '{ s += $1 } END { print s }')
+          read -r orte_groesste orte_groesste_datei < <(find "orte/$VERSION/orte" -name '*.json' -printf '%s %f\n' | sort -n | tail -1)
+          [ "$orte_groesste" -le $((25 * 1024 * 1024)) ] || { echo "::error::$orte_groesste_datei größer als 25 MiB"; exit 1; }
+          jq -n --arg version "$VERSION" --arg datum "$DATUM" --arg commit "$GITHUB_SHA" \
+            --slurpfile kacheln <(jq -s 'sort_by(.name)' messung/kacheln-*.json) \
+            --slurpfile randwege <(jq -s 'sort_by(.name)' messung/randwege-*.json) \
+            --argjson orte "$(jq .orte "orte/$VERSION/orte/index.json")" --argjson orte_dateien "$orte_dateien" \
+            --argjson orte_bytes "$orte_bytes" --argjson orte_archiv "$(stat -c %s ortsverzeichnis.tar.gz)" \
+            --arg orte_dauer "$(awk -F': ' '/Elapsed/ { print $2 }' zeit-orte.txt)" \
+            '($kacheln[0] | map(.name)) as $namen
+             | {version: $version, format: 2, osm_datum: $datum, commit: $commit,
+              archive: ([$kacheln[0][].archiv] + ["ortsverzeichnis.tar.gz", "zeiger.tar.gz"]),
+              kacheln: ($kacheln[0] | map(.kacheln) | add), bytes: ($kacheln[0] | map(.bytes) | add),
+              archiv_bytes: ($kacheln[0] | map(.archiv_bytes) | add),
+              groesste_kachel: ($kacheln[0] | map(.groesste_kachel) | max_by(.bytes)),
+              regionen: [$kacheln[0][] as $k | ($randwege[0][] | select(.name == $k.name)) as $r
+                | $k + {randwege: ($r | del(.name))} | del(.sha256)],
+              ortsverzeichnis: {format: 1, orte: $orte, dateien: $orte_dateien, bytes: $orte_bytes,
+                archiv_bytes: $orte_archiv, dauer: $orte_dauer}}' > wegegraph.json
+          cat wegegraph.json
+          {
+            jq -r '"\(.sha256)  \(.archiv)"' messung/kacheln-*.json
+            sha256sum ortsverzeichnis.tar.gz zeiger.tar.gz wegegraph.json
+          } | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+
+          mib() { awk -v b="$1" 'BEGIN { printf "%.1f MiB", b / 1048576 }'; }
+          {
+            echo "Wegegraph (Format 2, [Format](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/wegegraph-format.md))"
+            echo "und Ortsverzeichnis aus Geofabrik-Auszügen, OSM-Daten vom $DATUM. Alle Archive gehören entpackt in"
+            echo "denselben Ordner (README, „Release“)."
+            echo
+            echo "| Region | Auszug | Kacheln | Größe | gepackt | größte Kachel | Bau | Randwege |"
+            echo "|---|---|---|---|---|---|---|---|"
+            for f in messung/kacheln-*.json; do
+              name=$(jq -r .name "$f")
+              r="messung/randwege-$name.json"
+              echo "| $name | \`$(jq -r .quelle "$f")\`, $(mib "$(jq .auszug_bytes "$f")") | $(jq .kacheln "$f") | $(mib "$(jq .bytes "$f")") | $(mib "$(jq .archiv_bytes "$f")") | \`$(jq -r .groesste_kachel.pfad "$f")\` $(mib "$(jq .groesste_kachel.bytes "$f")") | $(jq -r .bau.dauer "$f"), $(mib $(($(jq .bau.speicher_hoechstens_kb "$f") * 1024))) | $(jq -r '.ziele | join(", ")' "$r") $(mib "$(jq .bytes "$r")"); $(jq -r .dauer "$r"), $(mib $(($(jq .speicher_kb "$r") * 1024))) |"
+            done
+            echo
+            echo "Ortsverzeichnis: $(jq .ortsverzeichnis.orte wegegraph.json) Orte in $orte_dateien Dateien, $(mib "$orte_bytes"), gepackt $(mib "$(stat -c %s ortsverzeichnis.tar.gz)"); größte \`$orte_groesste_datei\` $(mib "$orte_groesste") ([Format](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/ortsverzeichnis-format.md))"
+            echo
+            echo "Daten © [OpenStreetMap-Mitwirkende](https://www.openstreetmap.org/copyright), Open Database License"
+            echo "(ODbL) 1.0. Wegegraph und Ortsverzeichnis sind abgeleitete Datenbanken und stehen ebenfalls unter der ODbL."
+          } > notizen.md
+          cat notizen.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release
+        if: env.PROBELAUF != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$VERSION" ortsverzeichnis.tar.gz zeiger.tar.gz wegegraph.json SHA256SUMS --repo "$GITHUB_REPOSITORY"
+          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest \
+            --title "Wegegraph $DATUM" --notes-file notizen.md
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt,isDraft \
+            --jq "map(select(.isDraft | not)) | sort_by(.createdAt) | reverse | .[$BEHALTEN:] | .[].tagName" |
+            while read -r alt; do gh release delete "$alt" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes; done

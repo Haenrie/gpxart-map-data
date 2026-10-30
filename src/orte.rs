@@ -9,6 +9,7 @@ use std::path::Path;
 
 use osmpbf::{Element, ElementReader, IndexedReader, RelMemberType};
 
+use crate::flaeche::Flaeche;
 use crate::{TileRange, tiling};
 
 /// Arten (`place=*`) im Verzeichnis, mit dem Richtwert für die Größe, wenn ein Ort keine Einwohnerzahl nennt. Die
@@ -24,14 +25,10 @@ const ARTEN: [(&str, u32); 6] = [
 const STADT: usize = 2;
 /// Namen in diesen Sprachen kommen dazu, wenn sie vom Namen abweichen (München, Munich).
 const SPRACHEN: [&str; 2] = ["de", "en"];
-/// Staaten im Verzeichnis (ISO 3166-1): Gibt es ihre Grenzen, fallen Orte außerhalb weg.
-const STAATEN: [&str; 4] = ["DE", "AT", "CH", "LI"];
 /// So viele Anfangsbuchstaben eines Wortes bestimmen den Teil des Verzeichnisses.
 const SCHLUESSEL: usize = 2;
 /// Wörter ab dem zweiten zählen erst ab dieser Länge („Landsberg am Lech“ steht unter „la“ und „le“, nicht „am“).
 const WORT_MIN: usize = 3;
-/// Breite der Streifen, in die die Grenzen für die Strahlprobe geteilt sind (Grad)
-const STREIFEN: f64 = 0.02;
 /// So lang dürfen die Lücken in einer Grenze zusammen sein, die gerade Linien schließen (km), …
 const MAX_LUECKEN_KM: f64 = 100.0;
 /// … und so groß der Anteil der fehlenden Wege (in Teilauszügen fehlt meist der größte Teil).
@@ -49,7 +46,7 @@ struct Ort {
     groesse: u32,
 }
 
-/// Grenz-Relation eines Landes (`admin_level=4`) oder Staates (`admin_level=2`) in DACH
+/// Grenz-Relation eines Landes (`admin_level=4`) oder Staates (`admin_level=2`)
 #[derive(Clone)]
 struct Grenze {
     ebene: u8,
@@ -61,9 +58,12 @@ struct Grenze {
 }
 
 /// Orte und Landesgrenzen aus OSM, gesammelt aus einer oder mehreren Eingabedateien; `verzeichnis` macht daraus das
-/// Ortsverzeichnis. Was in mehreren Dateien steht, zählt einmal (nach OSM-ID).
+/// Ortsverzeichnis, `ortsliste` die Liste einer Region dafür. Was in mehreren Dateien steht, zählt einmal (nach
+/// OSM-ID).
 #[derive(Default)]
 pub struct Orte {
+    /// Nur die Grenzen dieser Staaten (ISO 3166-1) zählen, ohne Angabe die aller.
+    staaten: Option<Vec<String>>,
     orte: BTreeMap<i64, Ort>,
     grenzen: BTreeMap<i64, Grenze>,
     /// Knoten-IDs der Wege, aus denen die Grenzen bestehen
@@ -81,10 +81,17 @@ pub struct Ortsverzeichnis {
     pub meldungen: Vec<String>,
 }
 
+/// Ein Ort mit ID und Land (Name deutsch, englisch, Staat), so wie er ins Verzeichnis kommt
+type OrtImLand = (i64, Ort, Option<[String; 3]>);
+
 impl Grenze {
     /// Eintrag in der Liste der Länder: Name deutsch, englisch, Staat
-    fn land(&self) -> [&str; 3] {
-        [&self.name[0], &self.name[1], &self.staat]
+    fn land(&self) -> [String; 3] {
+        [
+            self.name[0].clone(),
+            self.name[1].clone(),
+            self.staat.clone(),
+        ]
     }
 }
 
@@ -94,6 +101,15 @@ enum Fund {
 }
 
 impl Orte {
+    /// Orte, bei denen nur die Grenzen dieser Staaten (ISO 3166-1) zählen: die einer Region. `Orte::default()` nimmt
+    /// die Grenzen aller Staaten.
+    pub fn fuer_staaten(staaten: &[String]) -> Orte {
+        Orte {
+            staaten: Some(staaten.to_vec()),
+            ..Orte::default()
+        }
+    }
+
     /// Nimmt den Knoten auf: als Ort, wenn er einer ist, sonst nur seine Lage (für Grenzen).
     pub fn add_node(&mut self, id: i64, lat: f64, lon: f64, tags: &[(&str, &str)]) {
         if let Some(ort) = ort(lat, lon, tags.iter().copied()) {
@@ -106,9 +122,10 @@ impl Orte {
         self.wege.insert(id, nodes.to_vec());
     }
 
-    /// Nimmt die Relation auf, wenn sie die Grenze eines Landes oder Staates in DACH ist.
+    /// Nimmt die Relation auf, wenn sie die Grenze eines Landes oder Staates ist.
     pub fn add_relation(&mut self, id: i64, ways: &[i64], tags: &[(&str, &str)]) {
-        if let Some(grenze) = grenze(tags.iter().copied(), ways.to_vec()) {
+        let staaten = self.staaten.as_deref();
+        if let Some(grenze) = grenze(staaten, tags.iter().copied(), ways.to_vec()) {
             self.grenzen.insert(id, grenze);
         }
     }
@@ -116,6 +133,7 @@ impl Orte {
     /// Liest Orte und Landesgrenzen aus einer `.osm.pbf`-Datei: erst alle Orte und Grenz-Relationen (parallel), dann
     /// die Wege der Grenzen mit ihren Knoten.
     pub fn read_pbf(&mut self, path: &Path) -> Result<(), osmpbf::Error> {
+        let staaten = self.staaten.as_deref();
         let funde = ElementReader::from_path(path)?.par_map_reduce(
             |element| match element {
                 Element::DenseNode(n) => fund_ort(n.id(), n.lat(), n.lon(), n.tags()),
@@ -126,7 +144,7 @@ impl Orte {
                         .filter(|m| m.member_type == RelMemberType::Way)
                         .map(|m| m.member_id)
                         .collect();
-                    grenze(r.tags(), wege)
+                    grenze(staaten, r.tags(), wege)
                         .map(|g| vec![Fund::Grenze(r.id(), g)])
                         .unwrap_or_default()
                 }
@@ -183,7 +201,48 @@ impl Orte {
     /// Baut das Verzeichnis. Mit `bereiche` nur Orte in diesen z12-Kacheln (Testdaten); als nächstgrößere Stadt
     /// zählen trotzdem alle.
     pub fn verzeichnis(&self, bereiche: &[TileRange]) -> Ortsverzeichnis {
-        // Länder und Staaten mit vollständiger Grenze; Orte bekommen das Land, sonst den Staat (Liechtenstein).
+        let (orte, meldungen) = self.im_land();
+        Ortsverzeichnis {
+            meldungen,
+            ..verzeichnis_aus(&orte, bereiche)
+        }
+    }
+
+    /// Die Orte mit ihrem Land als Ortsliste einer Region (Text), aus der `Ortsverzeichnis::aus_listen` mit den Listen
+    /// der anderen Regionen das Verzeichnis baut; dazu die Zahl der Orte und die Meldungen wie bei `verzeichnis`.
+    pub fn ortsliste(&self) -> (String, usize, Vec<String>) {
+        let (orte, meldungen) = self.im_land();
+        let mut text = String::new();
+        for (id, ort, land) in &orte {
+            let land = land
+                .as_ref()
+                .map_or(["", "", ""], |l| [&l[0], &l[1], &l[2]]);
+            let _ = write!(
+                text,
+                "{id}\t{}\t{}\t{}\t{}",
+                ARTEN[ort.art].0, ort.lat, ort.lon, ort.groesse
+            );
+            let namen = ort.namen.iter().flat_map(|(s, n)| [*s, n.as_str()]);
+            for feld in land.into_iter().chain([ort.name.as_str()]).chain(namen) {
+                text.push('\t');
+                for c in feld.chars() {
+                    match c {
+                        '\\' => text.push_str("\\\\"),
+                        '\t' => text.push_str("\\t"),
+                        '\n' => text.push_str("\\n"),
+                        '\r' => text.push_str("\\r"),
+                        c => text.push(c),
+                    }
+                }
+            }
+            text.push('\n');
+        }
+        (text, orte.len(), meldungen)
+    }
+
+    /// Orte mit ihrem Land (Land, sonst Staat wie Liechtenstein). Gibt es eine vollständige Staatsgrenze, fallen Orte
+    /// ohne Land weg (der Auszug reicht über die Staaten hinaus), sonst (Teilauszüge) bleiben alle.
+    fn im_land(&self) -> (Vec<OrtImLand>, Vec<String>) {
         let mut meldungen = Vec::new();
         let mut flaechen: Vec<(&Grenze, Flaeche)> = Vec::new();
         for grenze in self.grenzen.values() {
@@ -205,102 +264,22 @@ impl Orte {
             flaechen
                 .iter()
                 .find(|(_, f)| f.enthaelt(ort.lat, ort.lon))
-                .map(|(g, _)| *g)
+                .map(|(g, _)| g.land())
         };
-
-        // Mit Staatsgrenzen bleiben nur die Orte in DACH, ohne sie (Teilauszüge) alle.
         let mit_staaten = flaechen.iter().any(|(g, _)| g.ebene == 2);
-        let orte: Vec<(i64, &Ort, Option<&Grenze>)> = self
+        let orte = self
             .orte
             .iter()
-            .map(|(&id, ort)| (id, ort, land_von(ort)))
+            .map(|(&id, ort)| (id, ort.clone(), land_von(ort)))
             .filter(|(_, _, land)| land.is_some() || !mit_staaten)
             .collect();
-        let staedte: Vec<(i64, &Ort, f64)> = orte
-            .iter()
-            .filter(|(_, ort, _)| ort.art < STADT)
-            .map(|&(id, ort, _)| (id, ort, (ort.groesse as f64).sqrt()))
-            .collect();
-
-        let orte: Vec<_> = orte
-            .into_iter()
-            .filter(|(_, ort, _)| bereiche.is_empty() || in_bereichen(ort, bereiche))
-            .collect();
-        let laender: BTreeMap<[&str; 3], usize> = orte
-            .iter()
-            .filter_map(|(_, _, land)| land.map(Grenze::land))
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .enumerate()
-            .map(|(nummer, land)| (land, nummer))
-            .collect();
-
-        // Jeder Ort steht in den Teilen der Anfangsbuchstaben seiner Wörter, in jedem Teil einmal; größte zuerst.
-        let mut zeilen: HashMap<i64, String> = HashMap::new();
-        let mut teile: BTreeMap<String, Vec<(u32, &str, i64)>> = BTreeMap::new();
-        for &(id, ort, land) in &orte {
-            let bei = (ort.art >= STADT)
-                .then(|| naechstgroessere_stadt(id, ort, &staedte))
-                .flatten();
-            let land = land.map(|g| laender[&g.land()]);
-            zeilen.insert(
-                id,
-                eintrag_json(ort, land, bei.map_or("", |s| s.name.as_str())),
-            );
-            let mut schluessel = BTreeSet::new();
-            for name in std::iter::once(&ort.name).chain(ort.namen.iter().map(|(_, n)| n)) {
-                for (i, wort) in woerter(name).iter().enumerate() {
-                    if i == 0 || wort.len() >= WORT_MIN {
-                        schluessel.insert(wort[..wort.len().min(SCHLUESSEL)].to_string());
-                    }
-                }
-            }
-            for s in schluessel {
-                teile
-                    .entry(s)
-                    .or_default()
-                    .push((ort.groesse, &ort.name, id));
-            }
-        }
-        let mut dateien = BTreeMap::new();
-        for (schluessel, eintraege) in &mut teile {
-            eintraege.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)).then(a.2.cmp(&b.2)));
-            let zeilen: Vec<&str> = eintraege.iter().map(|e| zeilen[&e.2].as_str()).collect();
-            dateien.insert(
-                format!("{schluessel}.json"),
-                format!("[\n{}\n]\n", zeilen.join(",\n")),
-            );
-        }
-
-        let anzahl = orte.len();
-        let mut index = format!("{{\"format\":1,\"orte\":{anzahl},\"teile\":[");
-        for (i, s) in teile.keys().enumerate() {
-            index.push_str(if i == 0 { "" } else { "," });
-            json_string(&mut index, s);
-        }
-        index.push_str("],\"laender\":[");
-        for (i, land) in laender.keys().enumerate() {
-            index.push_str(if i == 0 { "[" } else { ",[" });
-            for (j, teil) in land.iter().enumerate() {
-                index.push_str(if j == 0 { "" } else { "," });
-                json_string(&mut index, teil);
-            }
-            index.push(']');
-        }
-        index.push_str("]}\n");
-        dateien.insert("index.json".to_string(), index);
-
-        Ortsverzeichnis {
-            dateien,
-            orte: anzahl,
-            laender: laender.len(),
-            meldungen,
-        }
+        (orte, meldungen)
     }
 
     /// Fläche innerhalb der Grenze, oder warum es keine gibt. Fehlen einzelne Wege (der DACH-Auszug schneidet etwa die
     /// Grenze im Genfersee ab), schließen gerade Linien zwischen den offenen Enden die Ringe, solange höchstens
-    /// `MAX_ANTEIL_FEHLT` der Wege fehlen und die Linien zusammen höchstens `MAX_LUECKEN_KM` lang sind.
+    /// `MAX_ANTEIL_FEHLT` der Wege fehlen und die Linien zusammen höchstens `MAX_LUECKEN_KM` lang sind. Fehlen nur ganze
+    /// Ringe (Überseegebiete), zählen die vorhandenen.
     fn flaeche(&self, grenze: &Grenze) -> Result<(Flaeche, f64), String> {
         let mut kanten = Vec::new();
         let mut enden: HashMap<i64, u32> = HashMap::new();
@@ -344,10 +323,12 @@ impl Orte {
             kanten.push((a, offen.swap_remove(i)));
             luecken += km;
         }
+        // Schließen sich die vorhandenen Wege ohne Lücke zu Ringen, fehlen nur ganze Ringe (Frankreich ohne seine
+        // Überseegebiete); die Grenze zählt dann mit den vorhandenen.
         let anteil = ohne_weg as f64 / grenze.wege.len().max(1) as f64;
         if ohne_knoten > 0
             || kanten.is_empty()
-            || anteil > MAX_ANTEIL_FEHLT
+            || (anteil > MAX_ANTEIL_FEHLT && luecken > 0.0)
             || luecken > MAX_LUECKEN_KM
         {
             return Err(format!(
@@ -356,6 +337,157 @@ impl Orte {
             ));
         }
         Ok((Flaeche::neu(kanten), luecken))
+    }
+}
+
+impl Ortsverzeichnis {
+    /// Baut das Verzeichnis aus den Ortslisten der Regionen (`Orte::ortsliste`). Steht ein Ort in mehreren, zählt er
+    /// einmal, mit Land, wenn eine Liste es kennt.
+    pub fn aus_listen(listen: &[String]) -> Result<Ortsverzeichnis, String> {
+        let mut orte: BTreeMap<i64, (Ort, Option<[String; 3]>)> = BTreeMap::new();
+        for (nr, zeile) in listen.iter().flat_map(|l| l.lines()).enumerate() {
+            let (id, ort, land) =
+                ort_aus_zeile(zeile).ok_or(format!("Ortsliste, Zeile {}", nr + 1))?;
+            if orte
+                .get(&id)
+                .is_none_or(|(_, alt)| alt.is_none() && land.is_some())
+            {
+                orte.insert(id, (ort, land));
+            }
+        }
+        let orte: Vec<OrtImLand> = orte
+            .into_iter()
+            .map(|(id, (ort, land))| (id, ort, land))
+            .collect();
+        Ok(verzeichnis_aus(&orte, &[]))
+    }
+}
+
+/// Eine Zeile der Ortsliste: ID, Art, Breite, Länge, Größe, Land (deutsch, englisch, Staat; ohne Land leer), Name,
+/// dann je Sprache Kürzel und Name; Tabulatoren dazwischen, `\` maskiert Tabulator, Zeilenwechsel und sich selbst.
+fn ort_aus_zeile(zeile: &str) -> Option<OrtImLand> {
+    let felder: Vec<String> = zeile
+        .split('\t')
+        .map(|feld| {
+            let mut s = String::new();
+            let mut zeichen = feld.chars();
+            while let Some(c) = zeichen.next() {
+                s.push(match c {
+                    '\\' => match zeichen.next() {
+                        Some('t') => '\t',
+                        Some('n') => '\n',
+                        Some('r') => '\r',
+                        _ => '\\',
+                    },
+                    c => c,
+                });
+            }
+            s
+        })
+        .collect();
+    if felder.len() < 9 || felder.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut namen = Vec::new();
+    for paar in felder[9..].chunks(2) {
+        let sprache = SPRACHEN.iter().find(|s| **s == paar[0])?;
+        namen.push((*sprache, paar[1].clone()));
+    }
+    let land =
+        (!felder[7].is_empty()).then(|| [felder[5].clone(), felder[6].clone(), felder[7].clone()]);
+    let ort = Ort {
+        name: felder[8].clone(),
+        namen,
+        art: ARTEN.iter().position(|(a, _)| *a == felder[1])?,
+        lat: felder[2].parse().ok()?,
+        lon: felder[3].parse().ok()?,
+        groesse: felder[4].parse().ok()?,
+    };
+    Some((felder[0].parse().ok()?, ort, land))
+}
+
+/// Das Verzeichnis aus den Orten mit Land; mit `bereiche` nur die Orte in diesen z12-Kacheln, als nächstgrößere Stadt
+/// zählen trotzdem alle.
+fn verzeichnis_aus(orte: &[OrtImLand], bereiche: &[TileRange]) -> Ortsverzeichnis {
+    let staedte: Vec<(i64, &Ort, f64)> = orte
+        .iter()
+        .filter(|(_, ort, _)| ort.art < STADT)
+        .map(|(id, ort, _)| (*id, ort, (ort.groesse as f64).sqrt()))
+        .collect();
+
+    let orte: Vec<&OrtImLand> = orte
+        .iter()
+        .filter(|(_, ort, _)| bereiche.is_empty() || in_bereichen(ort, bereiche))
+        .collect();
+    let laender: BTreeMap<&[String; 3], usize> = orte
+        .iter()
+        .filter_map(|(_, _, land)| land.as_ref())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .enumerate()
+        .map(|(nummer, land)| (land, nummer))
+        .collect();
+
+    // Jeder Ort steht in den Teilen der Anfangsbuchstaben seiner Wörter, in jedem Teil einmal; größte zuerst.
+    let mut zeilen: HashMap<i64, String> = HashMap::new();
+    let mut teile: BTreeMap<String, Vec<(u32, &str, i64)>> = BTreeMap::new();
+    for &(id, ort, land) in &orte {
+        let bei = (ort.art >= STADT)
+            .then(|| naechstgroessere_stadt(*id, ort, &staedte))
+            .flatten();
+        let land = land.as_ref().map(|l| laender[l]);
+        zeilen.insert(
+            *id,
+            eintrag_json(ort, land, bei.map_or("", |s| s.name.as_str())),
+        );
+        let mut schluessel = BTreeSet::new();
+        for name in std::iter::once(&ort.name).chain(ort.namen.iter().map(|(_, n)| n)) {
+            for (i, wort) in woerter(name).iter().enumerate() {
+                if i == 0 || wort.len() >= WORT_MIN {
+                    schluessel.insert(wort[..wort.len().min(SCHLUESSEL)].to_string());
+                }
+            }
+        }
+        for s in schluessel {
+            teile
+                .entry(s)
+                .or_default()
+                .push((ort.groesse, &ort.name, *id));
+        }
+    }
+    let mut dateien = BTreeMap::new();
+    for (schluessel, eintraege) in &mut teile {
+        eintraege.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)).then(a.2.cmp(&b.2)));
+        let zeilen: Vec<&str> = eintraege.iter().map(|e| zeilen[&e.2].as_str()).collect();
+        dateien.insert(
+            format!("{schluessel}.json"),
+            format!("[\n{}\n]\n", zeilen.join(",\n")),
+        );
+    }
+
+    let anzahl = orte.len();
+    let mut index = format!("{{\"format\":1,\"orte\":{anzahl},\"teile\":[");
+    for (i, s) in teile.keys().enumerate() {
+        index.push_str(if i == 0 { "" } else { "," });
+        json_string(&mut index, s);
+    }
+    index.push_str("],\"laender\":[");
+    for (i, land) in laender.keys().enumerate() {
+        index.push_str(if i == 0 { "[" } else { ",[" });
+        for (j, teil) in land.iter().enumerate() {
+            index.push_str(if j == 0 { "" } else { "," });
+            json_string(&mut index, teil);
+        }
+        index.push(']');
+    }
+    index.push_str("]}\n");
+    dateien.insert("index.json".to_string(), index);
+
+    Ortsverzeichnis {
+        dateien,
+        orte: anzahl,
+        laender: laender.len(),
+        meldungen: Vec::new(),
     }
 }
 
@@ -402,8 +534,12 @@ fn ort<'a>(lat: f64, lon: f64, tags: impl Iterator<Item = (&'a str, &'a str)>) -
     })
 }
 
-/// Die Relation als Grenze eines Landes oder Staates in DACH (nach ISO 3166)
-fn grenze<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>, wege: Vec<i64>) -> Option<Grenze> {
+/// Die Relation als Grenze eines Landes oder Staates (nach ISO 3166), mit `staaten` nur eines dieser Staaten
+fn grenze<'a>(
+    staaten: Option<&[String]>,
+    tags: impl Iterator<Item = (&'a str, &'a str)>,
+    wege: Vec<i64>,
+) -> Option<Grenze> {
     let tags: HashMap<&str, &str> = tags.collect();
     if tags.get("boundary") != Some(&"administrative") {
         return None;
@@ -418,7 +554,7 @@ fn grenze<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>, wege: Vec<i64>) ->
         Some(&"4") => (4, tags.get("ISO3166-2")?.split_once('-')?.0.to_string()),
         _ => return None,
     };
-    if !STAATEN.contains(&staat.as_str()) {
+    if staaten.is_some_and(|s| !s.contains(&staat)) {
         return None;
     }
     let name = tags.get("name")?;
@@ -573,55 +709,4 @@ pub(crate) fn woerter(name: &str) -> Vec<String> {
         .filter(|w| !w.is_empty())
         .map(String::from)
         .collect()
-}
-
-/// Kante einer Grenze: (Breite, Länge) von Anfang und Ende
-type Kante = ((f64, f64), (f64, f64));
-
-/// Fläche innerhalb einer Grenze für die Strahlprobe: alle Kanten der Grenze, nach Breitenstreifen sortiert
-struct Flaeche {
-    sued: f64,
-    west: f64,
-    nord: f64,
-    ost: f64,
-    /// je Streifen die Kanten, die ihn berühren: (Breite, Länge) von Anfang und Ende
-    streifen: Vec<Vec<Kante>>,
-}
-
-impl Flaeche {
-    fn neu(kanten: Vec<Kante>) -> Flaeche {
-        let punkte = || kanten.iter().flat_map(|&(a, b)| [a, b]);
-        let sued = punkte().map(|p| p.0).fold(f64::INFINITY, f64::min);
-        let nord = punkte().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
-        let west = punkte().map(|p| p.1).fold(f64::INFINITY, f64::min);
-        let ost = punkte().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
-        let streifen_von = |lat: f64| ((lat - sued) / STREIFEN) as usize;
-        let mut streifen = vec![Vec::new(); streifen_von(nord) + 1];
-        for (a, b) in kanten {
-            for s in &mut streifen[streifen_von(a.0.min(b.0))..=streifen_von(a.0.max(b.0))] {
-                s.push((a, b));
-            }
-        }
-        Flaeche {
-            sued,
-            west,
-            nord,
-            ost,
-            streifen,
-        }
-    }
-
-    /// Strahlprobe nach Osten: Liegt der Punkt innen? Innere Ringe (Enklaven) zählen von selbst richtig.
-    fn enthaelt(&self, lat: f64, lon: f64) -> bool {
-        if lat < self.sued || lat > self.nord || lon < self.west || lon > self.ost {
-            return false;
-        }
-        let mut innen = false;
-        for &((y1, x1), (y2, x2)) in &self.streifen[((lat - self.sued) / STREIFEN) as usize] {
-            if (y1 > lat) != (y2 > lat) && lon < (x2 - x1) * (lat - y1) / (y2 - y1) + x1 {
-                innen = !innen;
-            }
-        }
-        innen
-    }
 }
