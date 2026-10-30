@@ -315,6 +315,10 @@ fn ein_zu_grosser_teil_wird_nach_dem_naechsten_buchstaben_des_namens_geteilt() {
         .map(|t| t.as_str().unwrap())
         .collect();
     assert!(!teile.contains(&"le"), "kein Ort heißt nur „Le“");
+    assert!(
+        teile.iter().all(|t| t.len() >= 2),
+        "kein Teil aus einem Buchstaben"
+    );
     for t in &teile {
         let groesse = dateien[&format!("{t}.json")].len();
         assert!(groesse <= 300_000, "{t}.json hat {groesse} Bytes");
@@ -330,8 +334,9 @@ fn ein_zu_grosser_teil_wird_nach_dem_naechsten_buchstaben_des_namens_geteilt() {
         ("he", "Les Herbiers"),
         ("la", "La Rochelle"),
         ("la", "Landsberg"),
-        ("l", "L'Isle-Adam"),
+        // ein erstes Wort aus einem Buchstaben zählt nicht, „isle“ dafür
         ("is", "L'Isle-Adam"),
+        ("ad", "L'Isle-Adam"),
     ] {
         verzeichnis.eintrag(teil, name);
     }

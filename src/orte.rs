@@ -32,7 +32,8 @@ const SCHLUESSEL: usize = 2;
 const TEIL_MAX: usize = 300_000;
 /// … höchstens bis zu so vielen Buchstaben.
 const SCHLUESSEL_MAX: usize = 6;
-/// Wörter ab dem zweiten zählen erst ab dieser Länge („Landsberg am Lech“ steht unter „la“ und „le“, nicht „am“).
+/// Wörter nach dem ersten aus mindestens `SCHLUESSEL` Buchstaben zählen erst ab dieser Länge („Landsberg am Lech“ steht
+/// unter „la“ und „le“, nicht „am“).
 const WORT_MIN: usize = 3;
 /// So lang dürfen die Lücken in einer Grenze zusammen sein, die gerade Linien schließen (km), …
 const MAX_LUECKEN_KM: f64 = 100.0;
@@ -451,12 +452,14 @@ fn verzeichnis_aus(orte: &[OrtImLand], bereiche: &[TileRange]) -> Ortsverzeichni
         );
         let mut reste = BTreeSet::new();
         for name in std::iter::once(&ort.name).chain(ort.namen.iter().map(|(_, n)| n)) {
+            // Das erste Wort aus mindestens zwei Buchstaben zählt immer („L'Isle-Adam“: „isle“), die übrigen ab drei.
             let woerter = woerter(name);
+            let erstes = woerter.iter().position(|w| w.len() >= SCHLUESSEL);
             for (i, wort) in woerter.iter().enumerate() {
-                if i == 0 || wort.len() >= WORT_MIN {
+                if Some(i) == erstes || wort.len() >= WORT_MIN {
                     let rest = woerter[i..].concat();
                     reste.insert((
-                        wort[..wort.len().min(SCHLUESSEL)].to_string(),
+                        wort[..SCHLUESSEL].to_string(),
                         rest[..rest.len().min(SCHLUESSEL_MAX)].to_string(),
                     ));
                 }
@@ -515,8 +518,8 @@ fn verzeichnis_aus(orte: &[OrtImLand], bereiche: &[TileRange]) -> Ortsverzeichni
     }
 }
 
-/// Teilt zu große Teile weiter: Ein Teil über `TEIL_MAX` Bytes (`bytes` je Ort) mit mindestens `SCHLUESSEL`
-/// Buchstaben wird nach dem nächsten Buchstaben des Rests geteilt („le“ → „lem“ für „Le Mans“), bis
+/// Teilt zu große Teile weiter: Ein Teil über `TEIL_MAX` Bytes (`bytes` je Ort) wird nach dem nächsten Buchstaben des
+/// Rests geteilt („le“ → „lem“ für „Le Mans“), bis
 /// `SCHLUESSEL_MAX`. Orte, deren Rest nicht länger ist als der Schlüssel, bleiben im geteilten Teil. Gibt die Teile
 /// (Schlüssel → Orte, je einmal) und die geteilten Schlüssel zurück.
 fn teilen(
@@ -535,10 +538,7 @@ fn teilen(
     while let Some((schluessel, eintraege)) = offen.pop_first() {
         let n = schluessel.len();
         let alle = ids(&eintraege);
-        if n < SCHLUESSEL
-            || n >= SCHLUESSEL_MAX
-            || alle.iter().map(|&id| bytes(id)).sum::<usize>() <= TEIL_MAX
-        {
+        if n >= SCHLUESSEL_MAX || alle.iter().map(|&id| bytes(id)).sum::<usize>() <= TEIL_MAX {
             teile.insert(schluessel, alle);
             continue;
         }

@@ -58,17 +58,18 @@ Land und nächstgrößere Stadt unterscheiden gleichnamige Orte.
 
 Die Wörter eines Namens sind die Folgen aus `a`–`z` und `0`–`9`, nachdem der Name klein geschrieben und gefaltet ist
 (Tabelle `FALTUNG` in `src/orte.rs`: `ä` → `a`, `ß` → `ss`, `é` → `e`, `ł` → `l` …); alle anderen Zeichen trennen
-Wörter. Ein Ort steht im Teil der ersten beiden Buchstaben jedes Wortes, beim ersten Wort immer, bei weiteren ab drei
-Buchstaben, und zwar für den Namen und die Namen in anderen Sprachen. „Landsberg am Lech“ steht also in `la.json` und
-`le.json`, „München“ (englisch „Munich“) einmal in `mu.json`. Hat das erste Wort nur einen Buchstaben, heißt der Teil
-nach ihm („L'Isle-Adam“: `l.json`, dazu `is.json` und `ad.json`).
+Wörter. Ein Ort steht im Teil der ersten beiden Buchstaben jedes Wortes, beim ersten Wort aus mindestens zwei
+Buchstaben immer, bei weiteren ab drei Buchstaben, und zwar für den Namen und die Namen in anderen Sprachen.
+„Landsberg am Lech“ steht also in `la.json` und `le.json`, „München“ (englisch „Munich“) einmal in `mu.json`,
+„L'Isle-Adam“ in `is.json` und `ad.json` (in Format 1 stand er auch in `l.json`, Teile aus einem Buchstaben gibt es
+seit Format 2 nicht mehr).
 
 **Geteilte Teile.** Wird ein Teil größer als 300 000 Bytes, wird er nach dem nächsten Buchstaben weiter geteilt, und
 zwar nach dem **Rest des Namens ab dem Wort, ohne Zwischenraum**: „Le Mans“ hat zum Wort „le“ den Rest „lemans“ und
 steht darum in `lem.json` statt `le.json` (Frankreich: viele Namen beginnen mit Le, La, Les, L'). Ein geteilter Teil
 behält nur die Orte, deren Rest nicht länger ist als sein Name (ein Ort, der nur „Le“ heißt); hat er keine, gibt es
 die Datei nicht. Ein Teil wird so oft geteilt, wie es nötig ist (`le` → `les` → `lesh`), höchstens bis zu sechs
-Buchstaben; Teile mit einem Buchstaben werden nicht geteilt. Den Teil zu einer Eingabe findet man genauso: das erste
+Buchstaben. Den Teil zu einer Eingabe findet man genauso: das erste
 Wort der Eingabe mit mindestens zwei Buchstaben, davon zwei Buchstaben, und solange der Teil in `geteilt` steht und die
 Eingabe ab diesem Wort ohne Zwischenraum länger ist, einen Buchstaben mehr davon („Le M“ → `lem`, „Les Herb“ → `lesh`,
 „L'Isle“ → `is`).
