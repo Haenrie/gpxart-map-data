@@ -256,7 +256,9 @@ Zu den Kacheln gehören auch Fährlinien aus DACH heraus (z. B. nach Skandinavie
 
 **Ortsverzeichnis** aller Regionen (Probelauf): 401 263 Orte in 68 Ländern (Bundesländer, Kantone, Régions, dazu
 Liechtenstein, Monaco, Andorra), 423 Dateien, 39,8 MB, Bau aus den Ortslisten 8 s. Französische Namen beginnen oft mit
-Le/La/Les: `le.json` hat 74 493 Einträge, 4,6 MB (gzip 1,1 MB), `la.json` 4,3 MB; die übrigen Teile höchstens 1,3 MB.
+Le/La/Les: In Format 1 hatte `le.json` 74 493 Einträge, 4,6 MB (gzip 1,1 MB), `la.json` 4,3 MB. Seit Format 2
+(gpxart.com #90) sind zu große Teile geteilt: 1 531 Dateien, 39,7 MB, 58 Teile geteilt, größter Teil 298 kB (gzip
+76 kB), z. B. „Le Mans“ in `lema.json` (85 kB), „Landsberg am Lech“ in `land.json` (130 kB).
 DACH allein (`dach-261018`, Windows-PC): 126 417 Orte (101 Großstädte, 2 621 Städte, 7 410 Stadtteile,
 1 886 Viertel, 46 410 Dörfer, 67 988 Weiler) in 52 Ländern und Kantonen; 324 Teile und `index.json`, zusammen 8,6 MB,
 gepackt (gzip) 2,8 MB. Ein Abruf beim Tippen ist meist wenige kB groß, der größte Teil (`sc.json`) 319 kB, gepackt

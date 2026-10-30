@@ -48,10 +48,22 @@ fn staedte_doerfer_und_stadtteile_kommen_unter_jedem_wortanfang_ins_verzeichnis(
         10.90,
         &[("amenity", "townhall"), ("name", "Lechrathaus")],
     );
+    orte.add_node(
+        7,
+        48.08,
+        10.91,
+        &[("place", "village"), ("name", "İskenderun")],
+    );
 
     let verzeichnis = Verzeichnis::lies(&orte);
 
-    assert_eq!(verzeichnis.anzahl, 3);
+    assert_eq!(verzeichnis.anzahl, 4);
+    assert_eq!(
+        verzeichnis.eintrag("is", "İskenderun")[1],
+        "village",
+        "„İ“ ist ein i, kein Wortende"
+    );
+    assert!(verzeichnis.teil("sk").is_none());
     let landsberg = verzeichnis.eintrag("la", "Landsberg am Lech");
     assert_eq!(landsberg[1], "town");
     assert_eq!(
@@ -282,6 +294,66 @@ fn ortslisten_der_regionen_ergeben_das_verzeichnis_wie_in_einem_stueck() {
     assert_eq!(kehl[0][6], "Strasbourg");
 }
 
+#[test]
+fn ein_zu_grosser_teil_wird_nach_dem_naechsten_buchstaben_des_namens_geteilt() {
+    let mut orte = Orte::default();
+    let mut id = 0;
+    let mut ort = |name: &str| {
+        id += 1;
+        orte.add_node(id, 47.0, 2.0, &[("place", "village"), ("name", name)]);
+    };
+    // So viele Dörfer „Le …“, dass „le“ über 300 kB groß wird, wie mit Frankreich (gpxart.com #90)
+    for i in 0..8000u32 {
+        let b = |n: u32| char::from(b'a' + (n % 26) as u8);
+        ort(&format!("Le {}{}{}ville", b(i), b(i / 26), b(i / 676)));
+    }
+    for name in [
+        "Le Mans",
+        "Lehrberg",
+        "La Rochelle",
+        "Les Herbiers",
+        "L'Isle-Adam",
+        "Landsberg",
+    ] {
+        ort(name);
+    }
+    let dateien = orte.verzeichnis(&[]).dateien;
+    let index: Value = serde_json::from_str(&dateien["index.json"]).unwrap();
+    assert_eq!(index["geteilt"], serde_json::json!(["le"]));
+    let teile: Vec<&str> = index["teile"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    assert!(!teile.contains(&"le"), "kein Ort heißt nur „Le“");
+    assert!(
+        teile.iter().all(|t| t.len() >= 2),
+        "kein Teil aus einem Buchstaben"
+    );
+    for t in &teile {
+        let groesse = dateien[&format!("{t}.json")].len();
+        assert!(groesse <= 300_000, "{t}.json hat {groesse} Bytes");
+    }
+
+    let verzeichnis = Verzeichnis::lies(&orte);
+    // Teil nach dem Rest des Namens ab dem Wort ohne Zwischenraum: „le m…“ → „lem“
+    for (teil, name) in [
+        ("lem", "Le Mans"),
+        ("ma", "Le Mans"),
+        ("leh", "Lehrberg"),
+        ("les", "Les Herbiers"),
+        ("he", "Les Herbiers"),
+        ("la", "La Rochelle"),
+        ("la", "Landsberg"),
+        // ein erstes Wort aus einem Buchstaben zählt nicht, „isle“ dafür
+        ("is", "L'Isle-Adam"),
+        ("ad", "L'Isle-Adam"),
+    ] {
+        verzeichnis.eintrag(teil, name);
+    }
+}
+
 /// Ein Land (`admin_level=4`) oder Staat (`2`) als Rechteck (Süd-West, Nord-Ost), als Grenz-Relation
 /// `boundary=administrative`.
 #[allow(clippy::too_many_arguments)]
@@ -337,7 +409,7 @@ impl Verzeichnis {
     fn lies(orte: &Orte) -> Verzeichnis {
         let dateien = orte.verzeichnis(&[]).dateien;
         let index: Value = serde_json::from_str(&dateien["index.json"]).unwrap();
-        assert_eq!(index["format"], 1);
+        assert_eq!(index["format"], 2);
         let teile = index["teile"]
             .as_array()
             .unwrap()

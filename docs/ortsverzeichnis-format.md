@@ -1,4 +1,4 @@
-# Ortsverzeichnis, Format 1
+# Ortsverzeichnis, Format 2
 
 Das Ortsverzeichnis ist die Quelle der Ortssuche im Planer von gpxart.com: Man tippt einen Ort, und die Karte springt
 dorthin. Der Builder baut es mit `wegegraph orte` aus denselben OSM-Daten wie den Wegegraphen. Diese Fassung ist
@@ -9,11 +9,14 @@ der Version und ändert sich wie sie nie.
 
 | Datei | Inhalt |
 |---|---|
-| `index.json` | Zahl der Orte, Liste der Teile, Länder |
-| `<teil>.json` | alle Orte, von deren Namen ein Wort mit diesen zwei Buchstaben beginnt, z. B. `la.json` |
+| `index.json` | Zahl der Orte, Liste der Teile, geteilte Teile, Länder |
+| `<teil>.json` | alle Orte, von deren Namen ein Wort mit diesen zwei Buchstaben beginnt, z. B. `la.json`; ist ein Teil zu groß, mit mehr Buchstaben (`lem.json`, siehe „Teile“) |
 
-Der Planer lädt `index.json` beim ersten Fokus auf das Suchfeld und beim Tippen nur den Teil, der zu den ersten beiden
-Buchstaben der Eingabe passt. Gesucht wird im Browser.
+Der Planer lädt `index.json` beim ersten Fokus auf das Suchfeld und beim Tippen nur den Teil, der zur Eingabe passt.
+Gesucht wird im Browser.
+
+Format 2 (seit gpxart.com #90) unterscheidet sich von Format 1 nur durch geteilte Teile und das Feld `geteilt`; ein
+Verzeichnis in Format 1 ist eines in Format 2 ohne geteilte Teile.
 
 ## Welche Orte
 
@@ -54,23 +57,35 @@ Land und nächstgrößere Stadt unterscheiden gleichnamige Orte.
 ## Teile
 
 Die Wörter eines Namens sind die Folgen aus `a`–`z` und `0`–`9`, nachdem der Name klein geschrieben und gefaltet ist
-(Tabelle `FALTUNG` in `src/orte.rs`: `ä` → `a`, `ß` → `ss`, `é` → `e`, `ł` → `l` …); alle anderen Zeichen trennen
-Wörter. Ein Ort steht im Teil der ersten beiden Buchstaben jedes Wortes, beim ersten Wort immer, bei weiteren ab drei
-Buchstaben, und zwar für den Namen und die Namen in anderen Sprachen. „Landsberg am Lech“ steht also in `la.json` und
-`le.json`, „München“ (englisch „Munich“) einmal in `mu.json`. Hat das erste Wort nur einen Buchstaben, heißt der Teil
-nach ihm.
+(Tabelle `FALTUNG` in `src/orte.rs`: `ä` → `a`, `ß` → `ss`, `é` → `e`, `ł` → `l` …). Einzelne Akzentzeichen
+(U+0300–U+036F) fallen weg, so wird `İ` zu `i`; alle anderen Zeichen trennen Wörter. Ein Ort steht im Teil der ersten beiden Buchstaben jedes Wortes, beim ersten Wort aus mindestens zwei
+Buchstaben immer, bei weiteren ab drei Buchstaben, und zwar für den Namen und die Namen in anderen Sprachen.
+„Landsberg am Lech“ steht also in `la.json` und `le.json`, „München“ (englisch „Munich“) einmal in `mu.json`,
+„L'Isle-Adam“ in `is.json` und `ad.json` (in Format 1 stand er auch in `l.json`, Teile aus einem Buchstaben gibt es
+seit Format 2 nicht mehr).
+
+**Geteilte Teile.** Wird ein Teil größer als 300 000 Bytes, wird er nach dem nächsten Buchstaben weiter geteilt, und
+zwar nach dem **Rest des Namens ab dem Wort, ohne Zwischenraum**: „Le Mans“ hat zum Wort „le“ den Rest „lemans“ und
+steht darum in `lem.json` statt `le.json` (Frankreich: viele Namen beginnen mit Le, La, Les, L'). Ein geteilter Teil
+behält nur die Orte, deren Rest nicht länger ist als sein Name (ein Ort, der nur „Le“ heißt); hat er keine, gibt es
+die Datei nicht. Ein Teil wird so oft geteilt, wie es nötig ist (`le` → `les` → `lesh`), höchstens bis zu sechs
+Buchstaben. Den Teil zu einer Eingabe findet man genauso: das erste
+Wort der Eingabe mit mindestens zwei Buchstaben, davon zwei Buchstaben, und solange der Teil in `geteilt` steht und die
+Eingabe ab diesem Wort ohne Zwischenraum länger ist, einen Buchstaben mehr davon („Le M“ → `lem`, „Les Herb“ → `lesh`,
+„L'Isle“ → `is`).
 
 ## `index.json`
 
 ```json
-{"format":1,"orte":126417,"teile":["aa","ab",…],"laender":[["Aargau","Aargau","CH"],…,["Bayern","Bavaria","DE"],…]}
+{"format":2,"orte":401263,"teile":["aa","ab",…,"lea","leb",…],"geteilt":["la","le"],"laender":[["Aargau","Aargau","CH"],…]}
 ```
 
 | Feld | Inhalt |
 |---|---|
-| `format` | 1 |
+| `format` | 2 |
 | `orte` | Zahl der Orte |
 | `teile` | Namen der Teile (ohne `.json`), sortiert; andere gibt es nicht |
+| `geteilt` | geteilte Teile, sortiert (siehe „Teile“); fehlt in Format 1 |
 | `laender` | Länder als `[Name deutsch, Name englisch, Staat]`, Staat nach ISO 3166-1; die Orte verweisen mit der Nummer darauf (ab 0) |
 
 ## `<teil>.json`
