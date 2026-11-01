@@ -3,8 +3,8 @@
 Builder für den **Wegegraphen** von [gpxart.com](https://gpxart.com), dem Planer für Strava-Art: Er liest
 OpenStreetMap-Daten (`.osm.pbf`) und schreibt das Wegenetz als z12-Kacheln, in denen der Planer im Browser Routen
 rechnet. Dazu baut er das **Ortsverzeichnis** für die Ortssuche im Planer (Städte, Orte, Dörfer und Stadtteile). Jedes
-Quartal baut ein GitHub-Actions-Lauf hier alle [Regionen](#regionen) (DACH, Frankreich, Monaco, Andorra), jede aus
-ihrem eigenen Geofabrik-Auszug, und veröffentlicht Kacheln und Ortsverzeichnis als
+Quartal baut ein GitHub-Actions-Lauf hier alle [Regionen](#regionen) (ganz Europa ohne Russland, in 13 Regionen), jede
+aus ihren eigenen Geofabrik-Auszügen, und veröffentlicht Kacheln und Ortsverzeichnis als
 [Release](https://github.com/Haenrie/gpxart-map-data/releases); gpxart.com liefert sie von dort aus.
 
 Hier liegt nur der Builder. Website, Router und Suche von gpxart.com sind nicht öffentlich.
