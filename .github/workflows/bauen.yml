@@ -168,7 +168,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.neu == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300 # Geofabrik kann sehr langsam sein: am 1.11.2026 gut 2½ Stunden für dach
     strategy:
       fail-fast: true
       matrix:
